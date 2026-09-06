@@ -93,9 +93,10 @@ async function shotStats(clip) {
 /**
  * ギズモ領域から、赤(X)/緑(Y)/青(Z) の正方向ラベル球の中心を求める。
  *
- * 正方向の球は不透明度 1、負方向は 0.4 なので、各色が最も強い画素は正方向の球にある。
- * ただし球の中心にはラベル文字が暗く描かれていて最輝点が中心からずれるため、
- * 最輝点の近傍で色が優勢な画素の重心を取って球の中心を出す。
+ * 軸線と球は同じ色で描かれているため「最も色が強い画素」では線上を拾ってしまう。
+ * 正方向の球は軸の先端にあるので、色が十分強い画素のうち**ギズモ中心から最も遠い**
+ * ものを選び、その近傍の重心を球の中心とする。負方向の球は不透明度 0.4 なので
+ * 強度のしきい値で除外される。
  * 戻り値はギズモ中心を原点とした座標。
  */
 async function axisBallPositions(clip) {
@@ -109,6 +110,8 @@ async function axisBallPositions(clip) {
     const g = c.getContext('2d');
     g.drawImage(img, 0, 0);
     const d = g.getImageData(0, 0, c.width, c.height).data;
+    const cx = c.width / 2;
+    const cy = c.height / 2;
 
     const score = (i, k) => {
       const r = d[i], gg = d[i + 1], b = d[i + 2];
@@ -119,25 +122,34 @@ async function axisBallPositions(clip) {
 
     const out = {};
     for (const k of ['X', 'Y', 'Z']) {
-      let best = -1, bx = 0, by = 0;
+      let max = 0;
+      for (let i = 0; i < d.length; i += 4) max = Math.max(max, score(i, k));
+      if (max <= 20) { out[k] = null; continue; }
+
+      // 負方向の球 (不透明度 0.4) を除外できる強さで絞る
+      const strong = max * 0.7;
+      let farDist = -1, fx = 0, fy = 0;
       for (let i = 0; i < d.length; i += 4) {
-        const sc = score(i, k);
-        if (sc > best) { best = sc; bx = (i / 4) % c.width; by = Math.floor(i / 4 / c.width); }
+        if (score(i, k) < strong) continue;
+        const x = (i / 4) % c.width, y = Math.floor(i / 4 / c.width);
+        const dist = Math.hypot(x - cx, y - cy);
+        if (dist > farDist) { farDist = dist; fx = x; fy = y; }
       }
-      if (best <= 20) { out[k] = null; continue; }
-      // 最輝点の近傍だけを見て重心を取る (反対方向の球を拾わないため)
+      if (farDist < 0) { out[k] = null; continue; }
+
+      // 見つけた先端の近傍だけで重心を取り、球の中心を出す
       let sx = 0, sy = 0, w = 0;
-      const R = 12;
-      for (let y = Math.max(0, by - R); y <= Math.min(c.height - 1, by + R); y++) {
-        for (let x = Math.max(0, bx - R); x <= Math.min(c.width - 1, bx + R); x++) {
+      const R = 10;
+      for (let y = Math.max(0, fy - R); y <= Math.min(c.height - 1, fy + R); y++) {
+        for (let x = Math.max(0, fx - R); x <= Math.min(c.width - 1, fx + R); x++) {
           const i = (y * c.width + x) * 4;
           const sc = score(i, k);
-          if (sc > best * 0.5) { sx += x * sc; sy += y * sc; w += sc; }
+          if (sc >= strong) { sx += x * sc; sy += y * sc; w += sc; }
         }
       }
       out[k] = w > 0
-        ? [Math.round(sx / w - c.width / 2), Math.round(sy / w - c.height / 2)]
-        : [bx - c.width / 2, by - c.height / 2];
+        ? [Math.round(sx / w - cx), Math.round(sy / w - cy)]
+        : [fx - cx, fy - cy];
     }
     return out;
   }, buf.toString('base64'));
@@ -323,6 +335,53 @@ const csp = logs.filter((l) => /Content Security Policy/i.test(l));
 check('CSP 違反なし', csp.length === 0, csp.slice(0, 2).join(' | '));
 const errs = logs.filter((l) => l.startsWith('[pageerror]'));
 check('未捕捉の例外なし', errs.length === 0, errs.slice(0, 3).join(' | '));
+
+console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替えて検証) ===');
+{
+  // 実機が無くても UI の分岐だけは確認できるよう、navigator.xr を差し替える
+  const openWith = async (modes) => {
+    const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await p2.addInitScript((supported) => {
+      Object.defineProperty(navigator, 'xr', {
+        configurable: true,
+        value: { isSessionSupported: async (m) => supported.includes(m) },
+      });
+    }, modes);
+    await p2.goto(`http://localhost:${port}${BASE}`, { waitUntil: 'load' });
+    await p2.waitForTimeout(800);
+    await p2.locator('input[type=file]').setInputFiles('/tmp/verify_sh0.ply');
+    await p2.waitForSelector('.panel:not([hidden])', { timeout: 60000 });
+    await p2.waitForTimeout(600);
+    return p2;
+  };
+
+  // (a) XR 非対応
+  let p2 = await openWith([]);
+  check('XR 非対応なら VR ボタンを出さない', await p2.locator('.button--vr').isHidden());
+  check('XR 非対応なら VR背景の選択も出さない', await p2.locator('#xr-background-select').isHidden());
+  await p2.close();
+
+  // (b) VR のみ対応 (パススルー非対応)
+  p2 = await openWith(['immersive-vr']);
+  check('VR 対応なら VR ボタンを出す', await p2.locator('.button--vr').isVisible());
+  check('VR 対応なら VR背景の選択を出す', await p2.locator('#xr-background-select').isVisible());
+  check('パススルー非対応なら選択肢を無効化する',
+    await p2.locator('#xr-background-select option[value=passthrough]').isDisabled());
+  check('パススルー非対応なら理由を表示する',
+    (await p2.locator('.panel__note--muted').innerText()).includes('パススルー'));
+  check('既定は背景色 (不透明)', (await p2.locator('#xr-background-select').inputValue()) === 'vr');
+  await p2.close();
+
+  // (c) VR とパススルーの両対応
+  p2 = await openWith(['immersive-vr', 'immersive-ar']);
+  check('パススルー対応なら選択肢が有効',
+    !(await p2.locator('#xr-background-select option[value=passthrough]').isDisabled()));
+  check('パススルー対応なら注記を出さない', await p2.locator('.panel__note--muted').isHidden());
+  await p2.selectOption('#xr-background-select', 'passthrough');
+  check('パススルーを選択できる',
+    (await p2.locator('#xr-background-select').inputValue()) === 'passthrough');
+  await p2.close();
+}
 
 await page.screenshot({ path: '/tmp/final.png' });
 console.log(`\n=========== ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'} ===========`);

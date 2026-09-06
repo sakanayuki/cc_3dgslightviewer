@@ -7,7 +7,7 @@ import { VrSession } from '../vr/VrSession';
 import { computeVrPlacement } from '../vr/placement';
 import { S } from '../ui/strings';
 import { ViewerError } from '../types';
-import type { SceneBounds } from '../types';
+import type { SceneBounds, XrMode, XrSupport } from '../types';
 
 /**
  * three.js のシーンとレンダーループの所有者。
@@ -33,22 +33,26 @@ export class Viewer {
   private bounds: SceneBounds | null = null;
   private lastFrameTime = performance.now();
   private vrActive = false;
+  /** 現在の背景色。パススルーから戻すときに使う */
+  private backgroundColor: string = BACKGROUND_COLORS[DEFAULT_BACKGROUND]!.value;
 
   constructor(
     readonly canvas: HTMLCanvasElement,
     onVrChange: (active: boolean) => void,
   ) {
-    const context = canvas.getContext('webgl2');
-    if (!context) throw new ViewerError(S.errNoWebgl2);
-
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      context,
+    // 描画バッファの属性は getContext の時点で決まる。既存のコンテキストを
+    // WebGLRenderer に渡す場合、コンストラクタ側の alpha 等は無視されるため
+    // ここで指定する。パススルー時に背景を透過させるため alpha は必須。
+    const context = canvas.getContext('webgl2', {
+      alpha: true,
       // Spark 公式の指示: 3DGS では画質向上に寄与せず性能を大きく落とす
       antialias: false,
-      alpha: false,
+      premultipliedAlpha: true,
       powerPreference: 'high-performance',
     });
+    if (!context) throw new ViewerError(S.errNoWebgl2);
+
+    this.renderer = new THREE.WebGLRenderer({ canvas, context });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
@@ -65,11 +69,12 @@ export class Viewer {
       renderer: this.renderer,
       rig: this.rig,
       worldRoot: this.worldRoot,
-      onEnter: () => {
+      onEnter: (mode) => {
         this.vrActive = true;
         this.gizmo.visible = false;
         this.camControls.setEnabled(false);
         this.applyVrPlacement();
+        this.applyXrBackground(mode);
         onVrChange(true);
       },
       onExit: () => {
@@ -77,6 +82,7 @@ export class Viewer {
         this.gizmo.visible = true;
         this.camControls.setEnabled(true);
         this.resetWorldRoot();
+        this.applyBackground();
         onVrChange(false);
       },
     });
@@ -111,7 +117,36 @@ export class Viewer {
   }
 
   setBackground(color: string): void {
-    this.scene.background = new THREE.Color(color);
+    this.backgroundColor = color;
+    // パススルー中は背景を差し替えない (終了時に applyBackground で反映される)
+    if (!this.passthroughActive) this.applyBackground();
+  }
+
+  private get passthroughActive(): boolean {
+    return this.vrActive && this.vr.activeMode === 'passthrough';
+  }
+
+  private applyBackground(): void {
+    this.scene.background = new THREE.Color(this.backgroundColor);
+    this.renderer.setClearAlpha(1);
+  }
+
+  /**
+   * パススルー時は背景を消してキャンバスを透過させる。
+   * こうしないと不透明な背景色がパススルー映像を覆ってしまう。
+   */
+  private applyXrBackground(mode: XrMode): void {
+    if (mode === 'passthrough') {
+      this.scene.background = null;
+      this.renderer.setClearAlpha(0);
+    } else {
+      this.applyBackground();
+    }
+  }
+
+  /** 対応している XR セッションを調べる */
+  checkXrSupport(): Promise<XrSupport> {
+    return this.vr.checkSupport();
   }
 
   /** 描画中の SplatMesh を差し替える。旧メッシュは破棄する */

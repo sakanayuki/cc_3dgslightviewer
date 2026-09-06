@@ -1,11 +1,12 @@
 import { BACKGROUND_COLORS, DEFAULT_BACKGROUND, LEVELS } from '../config';
 import { S, formatCount } from './strings';
+import type { XrMode, XrSupport } from '../types';
 
 export interface ControlPanelCallbacks {
   onLevelChange: (level: number) => void;
   onBackgroundChange: (color: string) => void;
   onOpenAnother: () => void;
-  onToggleVr: () => void;
+  onToggleVr: (mode: XrMode) => void;
 }
 
 /** 左下のコントロールパネル */
@@ -17,6 +18,9 @@ export class ControlPanel {
   private readonly note: HTMLElement;
   private readonly vrButton: HTMLButtonElement;
   private readonly bgButtons: HTMLButtonElement[] = [];
+  private readonly xrRow: HTMLElement;
+  private readonly xrSelect: HTMLSelectElement;
+  private readonly xrNote: HTMLElement;
 
   constructor(private readonly cb: ControlPanelCallbacks) {
     this.root = document.createElement('div');
@@ -68,6 +72,32 @@ export class ControlPanel {
     bgRow.append(bgLabel, bgGroup);
     this.setActiveBackground(DEFAULT_BACKGROUND);
 
+    // VR 背景 (通常 / パススルー)
+    this.xrRow = document.createElement('div');
+    this.xrRow.className = 'panel__row';
+    this.xrRow.hidden = true;
+    const xrLabel = document.createElement('label');
+    xrLabel.textContent = S.labelXrBackground;
+    xrLabel.className = 'panel__label';
+    xrLabel.htmlFor = 'xr-background-select';
+    this.xrSelect = document.createElement('select');
+    this.xrSelect.className = 'panel__select';
+    this.xrSelect.id = 'xr-background-select';
+    for (const [value, label] of [
+      ['vr', S.xrBackgroundOpaque],
+      ['passthrough', S.xrBackgroundPassthrough],
+    ] as const) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label;
+      this.xrSelect.append(opt);
+    }
+    this.xrRow.append(xrLabel, this.xrSelect);
+
+    this.xrNote = document.createElement('p');
+    this.xrNote.className = 'panel__note panel__note--muted';
+    this.xrNote.hidden = true;
+
     // 注記 (VR中の制限など)
     this.note = document.createElement('p');
     this.note.className = 'panel__note';
@@ -92,10 +122,20 @@ export class ControlPanel {
     this.vrButton.className = 'button button--vr';
     this.vrButton.textContent = S.buttonEnterVr;
     this.vrButton.hidden = true;
-    this.vrButton.addEventListener('click', () => this.cb.onToggleVr());
+    this.vrButton.addEventListener('click', () => this.cb.onToggleVr(this.xrMode));
 
     actions.append(openAnother, this.vrButton);
-    this.root.append(levelRow, bgRow, this.note, hr, this.info, this.fileName, actions);
+    this.root.append(
+      levelRow,
+      bgRow,
+      this.xrRow,
+      this.xrNote,
+      this.note,
+      hr,
+      this.info,
+      this.fileName,
+      actions,
+    );
   }
 
   private setActiveBackground(index: number): void {
@@ -116,14 +156,35 @@ export class ControlPanel {
     this.select.disabled = busy;
   }
 
-  setVrAvailable(available: boolean): void {
+  /** 選択中の VR 背景 */
+  get xrMode(): XrMode {
+    return this.xrSelect.value === 'passthrough' ? 'passthrough' : 'vr';
+  }
+
+  /**
+   * 端末の XR 対応状況を反映する。
+   * パススルーは immersive-ar として提供されるため、VR とは別に判定される。
+   */
+  setXrSupport(support: XrSupport): void {
+    const available = support.vr || support.passthrough;
     this.vrButton.hidden = !available;
+    this.xrRow.hidden = !available;
+
+    const passthroughOption = this.xrSelect.options[1];
+    if (passthroughOption) passthroughOption.disabled = !support.passthrough;
+    if (!support.passthrough) this.xrSelect.value = 'vr';
+
+    this.xrNote.hidden = !available || support.passthrough;
+    this.xrNote.textContent = available && !support.passthrough
+      ? S.xrPassthroughUnsupported
+      : '';
   }
 
   /** VR 中は解像度を変更できない (設計書 11.1) */
   setVrActive(active: boolean): void {
     this.vrButton.textContent = active ? S.buttonExitVr : S.buttonEnterVr;
     this.select.disabled = active;
+    this.xrSelect.disabled = active;
     this.note.hidden = !active;
     this.note.textContent = active ? S.vrResolutionLocked : '';
   }

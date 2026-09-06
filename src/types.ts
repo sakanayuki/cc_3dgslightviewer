@@ -42,6 +42,19 @@ export interface LoadedModel {
   renderedSplats: number;
 }
 
+/**
+ * XR セッションの種類。
+ * - 'vr'          : immersive-vr。背景は不透明（選んだ背景色）
+ * - 'passthrough' : immersive-ar。背景にパススルーカメラの映像が透ける
+ */
+export type XrMode = 'vr' | 'passthrough';
+
+/** 端末が対応している XR セッションの種類 */
+export interface XrSupport {
+  vr: boolean;
+  passthrough: boolean;
+}
+
 export class ViewerError extends Error {
   constructor(
     message: string,

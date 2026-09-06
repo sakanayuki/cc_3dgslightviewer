@@ -16,7 +16,7 @@ import { FileDropZone } from './ui/FileDropZone';
 import { ProgressOverlay } from './ui/ProgressOverlay';
 import { S } from './ui/strings';
 import { ViewerError } from './types';
-import type { LoadProgress, LoadedModel } from './types';
+import type { LoadProgress, LoadedModel, XrMode } from './types';
 import './styles.css';
 
 class App {
@@ -36,7 +36,7 @@ class App {
       onLevelChange: (level) => void this.changeLevel(level),
       onBackgroundChange: (color) => this.viewer.setBackground(color),
       onOpenAnother: () => this.reset(),
-      onToggleVr: () => void this.toggleVr(),
+      onToggleVr: (mode) => void this.toggleVr(mode),
     });
 
     this.dropZone = new FileDropZone((file) => void this.load(file));
@@ -45,7 +45,7 @@ class App {
     root.append(this.dropZone.root, this.panel.root, this.overlay.root);
 
     this.viewer.start();
-    void this.viewer.vr.checkSupport().then((ok) => this.panel.setVrAvailable(ok));
+    void this.viewer.checkXrSupport().then((support) => this.panel.setXrSupport(support));
   }
 
   private progress = (p: LoadProgress): void => {
@@ -167,12 +167,13 @@ class App {
     }
   }
 
-  private async toggleVr(): Promise<void> {
+  private async toggleVr(mode: XrMode): Promise<void> {
     try {
       if (this.viewer.vr.isActive) await this.viewer.vr.exit();
-      else await this.viewer.vr.enter();
+      else await this.viewer.vr.enter(mode);
     } catch (e) {
       console.error('[main] VR セッションの開始に失敗しました', e);
+      this.overlay.showError(S.errXrStartFailed, () => this.overlay.hide());
     }
   }
 

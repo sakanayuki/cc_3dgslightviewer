@@ -15,6 +15,7 @@ export default tseslint.config(
         process: 'readonly',
         Buffer: 'readonly',
         URL: 'readonly',
+        navigator: 'readonly',
         Image: 'readonly',
         document: 'readonly',
       },

@@ -9,6 +9,13 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * hidden 属性を確実に効かせる。UA スタイルシートの [hidden]{display:none} は
+ * 作成者スタイル (.panel__row{display:flex} など) に必ず負けるため、
+ * 明示的に上書きしないと hidden を付けても表示されたままになる。
+ */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -150,3 +157,5 @@ html, body {
 @keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 .overlay__detail { margin-top: 12px; color: var(--panel-muted); font-size: 12px; }
 .overlay__box .button { margin-top: 18px; }
+
+.panel__note--muted { color: var(--panel-muted); }

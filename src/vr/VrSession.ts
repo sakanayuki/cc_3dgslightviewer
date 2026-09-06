@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { VR_FIXED_FOVEATION, VR_FRAMEBUFFER_SCALE } from '../config';
 import { GrabController } from './GrabController';
 import { Locomotion } from './Locomotion';
+import type { XrMode, XrSupport } from '../types';
+
+/** XR モードと WebXR のセッション種別の対応 */
+const SESSION_MODE: Record<XrMode, XRSessionMode> = {
+  vr: 'immersive-vr',
+  passthrough: 'immersive-ar',
+};
 
 /** xr-standard のボタン番号: 1 = squeeze (グリップ) */
 const BUTTON_SQUEEZE = 1;
@@ -12,7 +19,7 @@ export interface VrSessionOptions {
   rig: THREE.Group;
   /** グラブ対象。SplatMesh の親 */
   worldRoot: THREE.Group;
-  onEnter: () => void;
+  onEnter: (mode: XrMode) => void;
   onExit: () => void;
 }
 
@@ -31,7 +38,8 @@ export class VrSession {
   private readonly controllers: readonly [THREE.XRTargetRaySpace, THREE.XRTargetRaySpace];
   private readonly options: VrSessionOptions;
   private session: XRSession | undefined;
-  private supported = false;
+  private mode: XrMode = 'vr';
+  private support: XrSupport = { vr: false, passthrough: false };
 
   constructor(options: VrSessionOptions) {
     this.options = options;
@@ -51,20 +59,40 @@ export class VrSession {
     this.grab = new GrabController(options.worldRoot, this.controllers);
   }
 
-  /** WebXR VR に対応しているかを調べる。対応していなければボタンを出さない */
-  async checkSupport(): Promise<boolean> {
+
+  /**
+   * 対応している XR セッションを調べる。
+   * パススルーは immersive-ar として提供される。Quest 2 では利用できるが、
+   * 対応していない端末もあるため VR とは別に判定する。
+   */
+  async checkSupport(): Promise<XrSupport> {
     const xr = navigator.xr;
-    if (!xr) return false;
-    try {
-      this.supported = await xr.isSessionSupported('immersive-vr');
-    } catch {
-      this.supported = false;
-    }
-    return this.supported;
+    if (!xr) return this.support;
+    const probe = async (m: XRSessionMode): Promise<boolean> => {
+      try {
+        return await xr.isSessionSupported(m);
+      } catch {
+        return false;
+      }
+    };
+    this.support = {
+      vr: await probe('immersive-vr'),
+      passthrough: await probe('immersive-ar'),
+    };
+    return this.support;
   }
 
   get isSupported(): boolean {
-    return this.supported;
+    return this.support.vr || this.support.passthrough;
+  }
+
+  get supportsPassthrough(): boolean {
+    return this.support.passthrough;
+  }
+
+  /** 実行中のセッションの種類 */
+  get activeMode(): XrMode {
+    return this.mode;
   }
 
   get isActive(): boolean {
@@ -76,11 +104,12 @@ export class VrSession {
     this.locomotion.moveSpeed = metersPerSecond;
   }
 
-  async enter(): Promise<void> {
+  async enter(mode: XrMode): Promise<void> {
     if (this.session || !navigator.xr) return;
-    const session = await navigator.xr.requestSession('immersive-vr', {
+    const session = await navigator.xr.requestSession(SESSION_MODE[mode], {
       optionalFeatures: ['local-floor', 'bounded-floor'],
     });
+    this.mode = mode;
     this.session = session;
     session.addEventListener('end', () => {
       this.session = undefined;
@@ -89,7 +118,16 @@ export class VrSession {
       this.options.onExit();
     });
     await this.renderer.xr.setSession(session);
-    this.options.onEnter();
+
+    // 端末が immersive-ar を受け付けても実際には合成しない場合があるため、
+    // 実際のブレンドモードを見て確認する ('opaque' なら背景は透けない)。
+    if (mode === 'passthrough' && session.environmentBlendMode === 'opaque') {
+      console.warn(
+        '[VrSession] この端末は immersive-ar に対応していますが、environmentBlendMode が ' +
+          "'opaque' のためパススルーは合成されません。",
+      );
+    }
+    this.options.onEnter(mode);
   }
 
   async exit(): Promise<void> {
