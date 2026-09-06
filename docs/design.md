@@ -5,7 +5,7 @@
 
 - 対象リポジトリ: `sakanayuki/cc_3dgslightviewer`
 - 公開先: https://sakanayuki.github.io/cc_3dgslightviewer/
-- 本書バージョン: 1.0
+- 本書バージョン: 1.1 (実装で判明した事実を反映)
 - 最終更新: 2026-09-06
 
 ---
@@ -47,11 +47,14 @@ VR内での解像度変更UI / 一人称ウォークモード / 姿勢補正UI /
 |---|---|---|
 | 3DGSレンダラ | **Spark** (`@sparkjsdev/spark`) | `^2.1.0` |
 | 3Dエンジン | **three.js** | `^0.185.1`（Spark の peer 要件は `>=0.180.0`） |
-| 言語 | **TypeScript** | `^7.0.2` |
+| 言語 | **TypeScript** | `^5.9.0` |
 | ビルド | **Vite** | `^8.2.2` |
 | UI | **Vanilla TS**（フレームワークなし） | — |
-| テスト | **Vitest** | 最新 |
+| テスト | **Vitest** | `^5.0.0` |
 | 表示言語 | **日本語固定** | — |
+
+> TypeScript は当初 7.x を想定していたが、`typescript-eslint` 8.x が 7 系に未対応のため
+> 5.9 系で確定した。他は想定どおり。
 
 外部依存は `three` / `@sparkjsdev/spark`（と Spark の依存 `fflate`）のみ。**CDN は一切使用せず、全て同一オリジンにバンドルする。**
 
@@ -79,6 +82,14 @@ VR内での解像度変更UI / 一人称ウォークモード / 姿勢補正UI /
 - 量子化の基準値は `splatEncoding`（`rgbMin/rgbMax`、`lnScaleMin/lnScaleMax`、`sh1Max` 等）に保持される。
   **サブセットを作る際は `splatEncoding` を必ず引き継ぐこと。**引き継がないと色とスケールが壊れる。
 - 配列長はテクスチャ都合で `getTextureSize()` により切り上げられる。`numSplats` が実データ数、`packedArray.length / 4` は確保容量であり**一致しない**。
+- **`packedArray` の容量は `SPLAT_TEX_WIDTH`（= 2^11 = 2048）splat の倍数でなければならない。**
+  `PackedSplats.initialize()` は
+  `maxSplats = floor(floor(packedArray.length / 4) / SPLAT_TEX_WIDTH) * SPLAT_TEX_WIDTH`
+  と切り**下げ**るため、2048 未満の配列を渡すと `maxSplats` も `numSplats` も 0 になり、
+  例外も出さずに何も描画されない。Spark はこの定数を公開していないので、
+  `config.ts` の `SPLAT_TEX_WIDTH` に持ち、`subset.ts` で
+  「構築後の `numSplats` が期待値と一致するか」を実行時に検証して黙って壊れないようにする。
+  （実装時のスパイクで判明。最初はこれを知らず `numSplats = 0` になった）
 
 ---
 
@@ -300,19 +311,20 @@ new PackedSplats({
 
 5. 生成後に `dst.setMaxSh(maxSh)` を呼ぶ。
 
-### 7.3 実装時に必ず検証すること
+### 7.3 スパイクの結果（実装済み）
 
-`PackedSplats` の一部挙動はドキュメント化されていないため、実装者は以下を**最初のスパイクで確認**すること。
-いずれかが期待通りでない場合は、`constructSplats` コールバック内で `packedArray` を直接書き込む方式に切り替える。
+設計時にドキュメント化されていなかった `PackedSplats` の挙動は、実装前のスパイクで
+すべて確認済み。結果は以下のとおり。
 
-- [ ] `packedArray` / `numSplats` / `splatEncoding` / `extra` をコンストラクタに渡した `PackedSplats` が、そのまま `SplatMesh` に渡して正しく描画されるか。
-- [ ] `extra.sh1` 等を渡した場合に SH が実際に反映されるか（`getNumSh()` が期待値を返すか）。
-- [ ] `setMaxSh()` の呼び出しタイミング（構築前か後か）。
-- [ ] `src.extra.sh1Codes` / `sh2Codes` / `sh3Codes`（コードブック方式のSH）が存在しないこと。
-      これらは SOG / RAD 形式由来であり `.ply` / `.splat` では発生しない想定だが、
-      **存在を検出したら `maxSh = 0` にフォールバックし、コンソールに警告を出す**こと。
+| 確認項目 | 結果 |
+|---|---|
+| `packedArray` / `numSplats` / `splatEncoding` / `extra` をコンストラクタに渡して描画できるか | **可**。ただし容量を 2048 splat 単位に切り上げること（2.3 参照） |
+| ワード単位コピーが可逆か | **可逆**。2,500 件で `getSplat()` の全成分が完全一致（誤差 0） |
+| `extra.sh1/sh2/sh3` を渡して SH が反映されるか | **反映される**。`setMaxSh()` は構築後の呼び出しで有効 |
+| `sh1Codes` 等のコードブック方式 SH | `.ply` / `.splat` では発生しない。検出したら `maxSh = 0` にフォールバックし警告を出す実装を入れてある |
+| `extractSplats()` が SH を落とすか | **落とす**。`getSplat()` → `pushSplat()` の往復で DC 色のみが残る実装だった（自前実装が必要という判断は正しかった） |
 
----
+これらは `tests/subset.test.ts` で回帰テストとして固定している。
 
 ## 8. ロードと解像度切替のフロー
 
@@ -697,7 +709,7 @@ new SparkXr({
   style-src 'self' 'unsafe-inline';
   img-src 'self' data: blob:;
   font-src 'self';
-  connect-src 'self' blob:;
+  connect-src 'self' blob: data:;
   worker-src 'self' blob:;
   child-src 'self' blob:;
   object-src 'none';
@@ -713,7 +725,7 @@ new SparkXr({
 | `default-src 'self'` | 外部オリジンへの一切のアクセスを既定で禁止 |
 | `'wasm-unsafe-eval'` | **必須**。Spark はソートに WebAssembly を使う（`WASM_SPLAT_SORT = true`）。これがないとソートが動かない |
 | `worker-src 'self' blob:` | **必須**。Spark は Worker をバンドル内の文字列から `Blob` 経由で生成する |
-| `connect-src 'self' blob:` | Worker / WASM の blob URL 取得に必要。**外部オリジンは含めない** |
+| `connect-src 'self' blob: data:` | Worker の blob URL に加え、**`data:` が必須**。Spark の Worker は WASM バイナリを `data:application/wasm;base64,...` から `fetch` するため、これがないとパースが「読み込み中 0%」で止まる（実機検証で判明）。`data:` / `blob:` はインライン参照でネットワークに出ないため、**外部オリジンを一切含めない限り通信ゼロは保たれる** |
 | `style-src 'unsafe-inline'` | three.js / Spark が生成する VR ボタン等のインラインスタイルのため |
 | `form-action 'none'` | フォーム送信経路を塞ぐ |
 
@@ -852,7 +864,24 @@ jobs:
 | `levels.test.ts` | `selectIndices` が昇順かつ件数一致であること、境界（N=0, N=1, ratio=1.0） |
 | `subset.test.ts` | ワード単位コピーが正しいこと（ダミーの `Uint32Array` を作り、選択インデックスに対応するワード群が一致することを検証）、SH 各段の `wordsPerSplat` が 2/4/4 であること |
 
-**E2E は MVP に含めない。** WebGL と WebXR を要する検証は手動確認とする。
+**E2E は CI に含めない。** ただし手元で通せるブラウザ実機検証スクリプトを
+`tools/verify-browser.mjs` に用意した（Playwright + Chromium が必要）。
+ビルド済み `dist/` をローカル配信し、Chromium を駆動して以下を実画面から検証する。
+CSP の `data:` 不足はこのスクリプトで発見した。
+
+- 初期表示（ドロップゾーン、外部送信しない旨の明示）
+- 読み込み後の splat 数と既定レベル
+- 5段階すべての splat 数が定義どおりか
+- レベル切替でカメラが動かないこと
+- 背景色3色の切り替え
+- ギズモの軸クリックで投影形状が変わること
+- SH なしファイルの描画
+- 壊れたファイル / 非対応拡張子のエラー表示
+- **外部オリジンへのリクエストが 0 件であること、CSP 違反が 0 件であること**
+
+テスト用の合成 PLY は `tools/make-test-ply.mjs` で生成する。`slab`（軸ごとに寸法が
+異なる板状）と `cube`（等方）を選べる。**`cube` はどの軸から見ても同じに見えるため、
+視点変化の検証には使えない**（実際にこれで誤検知した）。
 
 ### 15.2 手動確認項目
 
@@ -900,8 +929,9 @@ jobs:
 | 7 | VR | `VrSession` + `Locomotion` + `GrabController` | Quest 2 実機で移動とグラブが動く |
 | 8 | 仕上げ | 背景色、文言整理、README、13.3 の検証 | 全手動確認項目を通過 |
 
-**フェーズ2の直後に、7.3 の「実装時に必ず検証すること」のスパイクを行うこと。**
-ここで `PackedSplats` の挙動が想定と異なると、フェーズ4の設計を変える必要が出るため、早期に潰す。
+フェーズ 1〜8 は実装済み。`PackedSplats` の挙動スパイク（7.3）はフェーズ2の直後に実施し、
+容量の 2048 単位切り上げという想定外の制約を発見した。ここを潰さないままフェーズ4に
+進むと「例外は出ないが何も描画されない」状態になっていた。
 
 ---
 

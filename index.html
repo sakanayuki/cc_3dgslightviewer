@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      アップロードしたファイルが外部に一切出ないことをブラウザに強制させる。
+        - 'wasm-unsafe-eval': Spark はソートに WebAssembly を使う
+        - worker-src blob:  : Spark は Worker をバンドル内の文字列から Blob 経由で生成する
+        - connect-src data: : Spark の Worker は WASM を data: URL から fetch する。
+                              data:/blob: はインライン参照でネットワークに出ないため、
+                              外部オリジンを一切含めないことで通信ゼロは保たれる。
+      frame-ancestors は meta では無視されるため指定しない (GitHub Pages は
+      カスタムヘッダを設定できないため、この構成では適用できない)。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self' 'wasm-unsafe-eval';
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' data: blob:;
+               font-src 'self';
+               connect-src 'self' blob: data:;
+               worker-src 'self' blob:;
+               child-src 'self' blob:;
+               object-src 'none';
+               base-uri 'self';
+               form-action 'none';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="3DGS (.ply / .splat) をブラウザ内だけで閲覧する軽量ビューア。外部にファイルを送信しません。"
+    />
+    <title>3DGS Light Viewer</title>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
