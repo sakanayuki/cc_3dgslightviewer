@@ -46,9 +46,33 @@ export const AUTOFIT_SAMPLE_COUNT = 100_000;
 export const AUTOFIT_PERCENTILE_LOW = 0.01;
 export const AUTOFIT_PERCENTILE_HIGH = 0.99;
 export const AUTOFIT_MARGIN = 1.2;
-/** 3DGS の PLY は INRIA 系の慣習で Y 軸が下向きのことが多い */
+
+/**
+ * 既定の上方向。3DGS の PLY は INRIA 系の慣習で Y 軸が下向きのことが多く、
+ * -Y を上とするのが実用的。
+ */
 export const DEFAULT_UP = new THREE.Vector3(0, -1, 0);
-export const ENABLE_UP_ESTIMATION = true;
+
+/**
+ * 既定で画面の右を向く軸。初期視点はこの軸が厳密に画面右になるよう算出する
+ * (autoFit.ts の computeInitialView を参照)。
+ */
+export const DEFAULT_RIGHT = new THREE.Vector3(1, 0, 0);
+
+/**
+ * 初期視点の仰角 [度]。DEFAULT_UP 側へこれだけ持ち上げた位置から見下ろす。
+ * この傾きは DEFAULT_RIGHT が画面右を向く性質を壊さない。
+ */
+export const DEFAULT_ELEVATION_DEG = 25;
+
+/**
+ * 主成分分析による上方向の自動推定。既定は無効で、常に DEFAULT_UP を使う。
+ *
+ * 推定は本質的にヒューリスティックで外すことがあり、初期の向きが
+ * ファイルごとに変わってしまう。向きを固定したほうが扱いやすいため既定は false。
+ * データ由来の傾きを自動補正したい場合のみ true にする。
+ */
+export const ENABLE_UP_ESTIMATION = false;
 /** 第3主成分/第2主成分の固有値比がこれ未満なら推定を採用する */
 export const UP_ESTIMATE_CONFIDENCE = 0.35;
 

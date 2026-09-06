@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PackedSplats, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { BACKGROUND_COLORS, DEFAULT_BACKGROUND } from '../config';
-import { OrbitCameraController } from '../camera/OrbitCameraController';
+import { CameraController } from '../camera/CameraController';
 import { AxisGizmo } from '../gizmo/AxisGizmo';
 import { VrSession } from '../vr/VrSession';
 import { S } from '../ui/strings';
@@ -23,7 +23,7 @@ export class Viewer {
   readonly rig = new THREE.Group();
   readonly worldRoot = new THREE.Group();
   readonly gizmo = new AxisGizmo();
-  readonly orbit: OrbitCameraController;
+  readonly camControls: CameraController;
   readonly vr: VrSession;
 
   private readonly sparkRenderer: SparkRenderer;
@@ -55,7 +55,7 @@ export class Viewer {
     this.sparkRenderer = new SparkRenderer({ renderer: this.renderer });
     this.scene.add(this.sparkRenderer);
 
-    this.orbit = new OrbitCameraController(this.camera, canvas);
+    this.camControls = new CameraController(this.camera, canvas);
     this.setBackground(BACKGROUND_COLORS[DEFAULT_BACKGROUND]!.value);
 
     this.vr = new VrSession({
@@ -65,13 +65,13 @@ export class Viewer {
       onEnter: () => {
         this.vrActive = true;
         this.gizmo.visible = false;
-        this.orbit.setEnabled(false);
+        this.camControls.setEnabled(false);
         onVrChange(true);
       },
       onExit: () => {
         this.vrActive = false;
         this.gizmo.visible = true;
-        this.orbit.setEnabled(true);
+        this.camControls.setEnabled(true);
         onVrChange(false);
       },
     });
@@ -92,7 +92,7 @@ export class Viewer {
     event.stopImmediatePropagation();
     event.preventDefault();
     const dir = this.gizmo.pick(event.clientX, event.clientY, rect);
-    if (dir) this.orbit.snapToDirection(dir);
+    if (dir) this.camControls.snapToDirection(dir);
   }
 
   resize(): void {
@@ -101,6 +101,8 @@ export class Viewer {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    // TrackballControls は画面寸法をキャッシュしているので更新が要る
+    this.camControls.handleResize();
   }
 
   setBackground(color: string): void {
@@ -125,7 +127,7 @@ export class Viewer {
 
   /** 自動フィット。VR の移動速度もシーンのスケールに合わせる */
   fitTo(bounds: SceneBounds): void {
-    this.orbit.fit(bounds);
+    this.camControls.fit(bounds);
     this.vr.setSceneRadius(bounds.radius);
     this.worldRoot.position.set(0, 0, 0);
     this.worldRoot.quaternion.identity();
@@ -144,7 +146,7 @@ export class Viewer {
     if (this.vrActive) {
       this.vr.update(this.camera, dt);
     } else {
-      this.orbit.update();
+      this.camControls.update();
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -157,7 +159,7 @@ export class Viewer {
     this.renderer.setAnimationLoop(null);
     this.clearSplats();
     this.gizmo.dispose();
-    this.orbit.dispose();
+    this.camControls.dispose();
     this.renderer.dispose();
   }
 }

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { PackedSplats } from '@sparkjsdev/spark';
 import {
   AUTOFIT_MARGIN,
+  DEFAULT_ELEVATION_DEG,
+  DEFAULT_RIGHT,
   AUTOFIT_PERCENTILE_HIGH,
   AUTOFIT_PERCENTILE_LOW,
   AUTOFIT_SAMPLE_COUNT,
@@ -192,6 +194,31 @@ export function symmetricEigen(mat: THREE.Matrix3): Eigen | null {
   return { values, vectors };
 }
 
+/**
+ * up を保ったまま、DEFAULT_RIGHT が画面右を向くカメラ位置の方向を求める。
+ *
+ * lookAt の基底では、視線方向の逆ベクトル z (= カメラ位置 - 注視点) に対し
+ * 画面右が x = normalize(cross(up, z)) になる。したがって
+ *   w = normalize(cross(right, up))
+ * とおくと cross(up, w) = right - up*(up・right) = right (right ⊥ up のとき) となり、
+ * z = w が求める方向。さらに z を up 方向へ仰角ぶん傾けても、z は span{w, up} に
+ * 留まるため cross(up, z) = cos(仰角) * right のまま向きは変わらない。
+ * つまり見下ろす角度を付けても right は画面右を向き続ける。
+ */
+export function computeViewDirection(up: THREE.Vector3, elevationDeg: number): THREE.Vector3 {
+  const u = up.clone().normalize();
+
+  // right が up と平行だと外積が 0 になるので、別の基準軸に退避する
+  let right = DEFAULT_RIGHT.clone();
+  if (Math.abs(right.dot(u)) > 0.99) right = new THREE.Vector3(0, 0, 1);
+  // right を up と直交させる
+  right.addScaledVector(u, -right.dot(u)).normalize();
+
+  const w = new THREE.Vector3().crossVectors(right, u).normalize();
+  const theta = THREE.MathUtils.degToRad(elevationDeg);
+  return w.multiplyScalar(Math.cos(theta)).addScaledVector(u, Math.sin(theta)).normalize();
+}
+
 /** バウンディングからカメラの初期位置・near/far を算出する */
 export function computeInitialView(
   bounds: SceneBounds,
@@ -199,13 +226,27 @@ export function computeInitialView(
 ): { position: THREE.Vector3; target: THREE.Vector3; near: number; far: number } {
   const fov = THREE.MathUtils.degToRad(fovDeg);
   const distance = (bounds.radius / Math.sin(fov / 2)) * AUTOFIT_MARGIN;
-  const dir = new THREE.Vector3(1, 0.6, 1).normalize();
-  // up が Y 下向きのときは見下ろす向きを反転させる
-  if (bounds.up.y < 0) dir.y = -dir.y;
+  const dir = computeViewDirection(bounds.up, DEFAULT_ELEVATION_DEG);
   return {
     position: bounds.center.clone().addScaledVector(dir, distance),
     target: bounds.center.clone(),
     near: Math.max(1e-4, bounds.radius / 1000),
     far: bounds.radius * 100,
   };
+}
+
+/**
+ * 指定方向からシーンを見るときの上方向を決める。
+ *
+ * 視線方向が up と平行になる (真上/真下から見る) と lookAt が退化するため、
+ * その場合は DEFAULT_RIGHT が画面右を向く上方向へ退避する。
+ */
+export function resolveUpFor(direction: THREE.Vector3, preferred: THREE.Vector3): THREE.Vector3 {
+  const d = direction.clone().normalize();
+  const p = preferred.clone().normalize();
+  if (Math.abs(d.dot(p)) < 0.99) return p;
+
+  const fallback = new THREE.Vector3().crossVectors(d, DEFAULT_RIGHT);
+  if (fallback.lengthSq() < 1e-8) fallback.crossVectors(d, new THREE.Vector3(0, 0, 1));
+  return fallback.normalize();
 }

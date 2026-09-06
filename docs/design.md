@@ -5,7 +5,7 @@
 
 - 対象リポジトリ: `sakanayuki/cc_3dgslightviewer`
 - 公開先: https://sakanayuki.github.io/cc_3dgslightviewer/
-- 本書バージョン: 1.1 (実装で判明した事実を反映)
+- 本書バージョン: 1.2 (既定の向きの固定と、回転の無制限化を反映)
 - 最終更新: 2026-09-06
 
 ---
@@ -164,7 +164,7 @@ VR での「移動」と「グラブ」を破綻なく両立させるため、**
 │   │   ├── levels.ts           5段階レベルの定義と選択インデックス生成
 │   │   └── subset.ts           SH保持サブセット構築
 │   ├── camera/
-│   │   ├── OrbitCameraController.ts
+│   │   ├── CameraController.ts 回転・平行移動・ズームと軸スナップ
 │   │   └── autoFit.ts          バウンディング推定と初期視点算出
 │   ├── gizmo/
 │   │   └── AxisGizmo.ts
@@ -448,17 +448,25 @@ export const KEEP_FULL_IN_MEMORY = false;
 
 ### 9.1 操作方式
 
-`three/addons/controls/OrbitControls.js` を使用する。
+`three/addons/controls/TrackballControls.js` を使用する。
 
 | 操作 | 割り当て |
 |---|---|
-| 左ドラッグ | 回転 |
+| 左ドラッグ | 回転（**制限なし。何回転でも続けられる**） |
 | 右ドラッグ / 中ドラッグ | 平行移動 |
 | ホイール | ズーム |
 | タッチ1本 | 回転 |
 | タッチ2本 | ズーム＋平行移動 |
 
-`enableDamping = true`、`dampingFactor = 0.08`。
+`staticMoving = false`、`dynamicDampingFactor = 0.15`。
+
+**OrbitControls を使わない理由**: OrbitControls はカメラ姿勢を極座標 (theta, phi) で保持し、
+`phi` を `[0, π]` にクランプする。このため真上・真下を越えて回そうとすると
+**90 度や 180 度で回転が止まる**。TrackballControls は視線ベクトルと `up` を
+クォータニオンで回すだけで極の特異点が無く、どの方向にも回し続けられる。
+
+その代わり `up` はドラッグに追従して動く（純粋な水平ドラッグではロールしないが、
+斜めドラッグでは少しロールが乗る）。向きを戻したいときはギズモの軸クリックを使う。
 
 ### 9.2 バウンディング推定（`autoFit.ts`）
 
@@ -471,23 +479,46 @@ export const KEEP_FULL_IN_MEMORY = false;
 
 ### 9.3 初期視点
 
+**既定の向きは「-Y 軸が画面上、+X 軸が画面右」**とする。方向はハードコードせず、
+この条件から導出する。
+
+`lookAt` の基底では、視線方向の逆ベクトル `z`（= カメラ位置 − 注視点）に対し
+画面右が `x = normalize(cross(up, z))` になる。したがって
+
 ```
-distance = radius / sin(fov / 2) × AUTOFIT_MARGIN   // AUTOFIT_MARGIN = 1.2
-direction = normalize(1, 0.6, 1)                     // 斜め上から見下ろす
+w = normalize(cross(DEFAULT_RIGHT, up))
+```
+
+とおくと `cross(up, w) = DEFAULT_RIGHT`（`DEFAULT_RIGHT ⊥ up` のとき）となり、`z = w` が求める方向。
+さらに `z` を `up` 方向へ仰角ぶん傾けても `z` は `span{w, up}` に留まるため
+`cross(up, z) = cos(仰角) × DEFAULT_RIGHT` のままで、**見下ろす角度を付けても
++X は画面右を向き続ける**。
+
+```
+direction = normalize(w × cos(仰角) + up × sin(仰角))   // 仰角 = DEFAULT_ELEVATION_DEG = 25°
+distance  = radius / sin(fov / 2) × AUTOFIT_MARGIN      // AUTOFIT_MARGIN = 1.2
+camera.up       = up
 camera.position = center + direction × distance
 controls.target = center
 camera.near = radius / 1000
 camera.far  = radius × 100
 ```
 
+`up = (0,-1,0)` の場合、`w = (0,0,-1)` となり camera は -Z 側から +Z を見る位置に付く。
 `near` / `far` を radius から導出することで、スケールが 0.01 の scene でも 10000 の scene でも破綻しない。
+
+`DEFAULT_RIGHT` が `up` と平行になる場合（`up = ±X`）は外積が 0 になるため、
+基準軸を `(0,0,1)` に退避させる。
 
 ### 9.4 上方向の推定
 
 3DGS の `.ply` は学習パイプラインによって上方向がまちまちで、特に INRIA 実装系は **Y軸が下向き**であることが多い。
 
-- **既定値**: `up = (0, -1, 0)`（`config.ts` の `DEFAULT_UP` として外出し）。
-- **自動推定（オプション）**: サンプリングした中心座標に対して主成分分析を行い、**最も分散の小さい主成分**を鉛直軸の候補とする。
+- **既定値**: `up = (0, -1, 0)`（`config.ts` の `DEFAULT_UP` として外出し）。**常にこれを使う。**
+- **自動推定は既定で無効**（`ENABLE_UP_ESTIMATION = false`）。推定は本質的にヒューリスティックで
+  外すことがあり、ファイルごとに初期の向きが変わってしまう。向きが固定されているほうが
+  扱いやすいため既定は無効とし、コードは残して切り替えられるようにしてある。
+- **自動推定（オプション、既定は無効）**: サンプリングした中心座標に対して主成分分析を行い、**最も分散の小さい主成分**を鉛直軸の候補とする。
   - 採用条件: `第3主成分の固有値 / 第2主成分の固有値 < UP_ESTIMATE_CONFIDENCE`（既定 0.35）。
     この比が大きい（＝形状が等方的で平面性が乏しい）場合は推定を信用せず、既定値を使う。
   - 向き（±）の決定: 推定軸の正負のうち、**splat 密度が低い側**を上とする（屋外スキャンでは空側が疎になる）。
@@ -534,8 +565,18 @@ renderer.autoClear = true;
 2. 矩形内なら、矩形内での正規化デバイス座標を計算して `Raycaster` で `gizmoScene` の6個の球に対して交差判定。
 3. ヒットしたら、`controls.target` と現在のカメラ距離を保ったまま、カメラ位置をその軸方向へ移動する。
    `GIZMO_SNAP_DURATION_MS`（既定 400ms）かけて `easeInOutCubic` で補間する。
-   補間中は `controls.enabled = false` とし、完了後に戻す。
-4. VRセッション中はギズモを非表示にし、クリック判定も行わない。
+   補間中は `controls.enabled = false` とし、さらに **`controls.update()` を呼ばない**
+   （呼ぶと補間した位置が上書きされる）。完了後に両方戻す。
+4. **`up` も同時に補間する。** 視線方向が `up` と平行になる真上・真下からの視点では
+   `lookAt` が退化するため、`resolveUpFor()` で退避先を決める:
+   - `|dot(視線, DEFAULT_UP)| < 0.99` なら `DEFAULT_UP` をそのまま使う
+   - 平行なら `normalize(cross(視線, DEFAULT_RIGHT))` を使う。これにより
+     **真上・真下から見たときも +X が画面右を向く**
+5. VRセッション中はギズモを非表示にし、クリック判定も行わない。
+
+クリックは canvas の **キャプチャ段階**で受け、ギズモ矩形内なら `stopImmediatePropagation()` する。
+カメラ操作も同じ canvas にリスナーを張るため、`stopPropagation()` では同一要素の
+他リスナーを止められず、ギズモ上のドラッグでシーンが回ってしまう。
 
 ---
 
@@ -1015,3 +1056,6 @@ export const PROGRESS_YIELD_INTERVAL_MS = 100;
 | D-9 | `rig` と `worldRoot` を分離 | スティック移動とグラブ操作が互いの座標系を壊さないため | Group が1つ増える |
 | D-10 | CSP で外部通信を機械的に禁止 | 依頼者の判断。要件の中核を規約ではなくブラウザに強制させる | `'wasm-unsafe-eval'` と `worker-src blob:` の許可が必要で、CSP としては最強ではない |
 | D-11 | 進捗バーで待たせる（先行描画しない） | 依頼者の判断。実装が単純で振る舞いが読みやすい | 500MB ファイルでは十数秒の待ちが発生する |
+| D-12 | 既定の向きを「-Y が上・+X が右」に固定 | 依頼者の指示。当初の方向 `(1, 0.6, 1)` では画面右ベクトルが `(-0.707, 0, 0.707)` となり **+X が左**を向いていた | 方向をハードコードせず条件から導出するため、算出コードがやや長い |
+| D-13 | up の自動推定を既定で無効化 | D-12 で向きを明示指定されたため、推定が働くと指定した既定が守られない。推定は外すことがあり、ファイルごとに初期の向きが変わる | データ由来の傾きは自動補正されない。`ENABLE_UP_ESTIMATION` で戻せる |
+| D-14 | OrbitControls → TrackballControls | 依頼者の指示。OrbitControls は極角 `phi` を `[0, π]` にクランプするため 90/180 度で回転が止まる。TrackballControls は特異点が無く回し続けられる | `up` がドラッグに追従して動き、斜めドラッグで少しロールが乗る。向きを戻す手段としてギズモの軸クリックがある |

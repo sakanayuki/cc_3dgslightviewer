@@ -90,6 +90,59 @@ async function shotStats(clip) {
   }, buf.toString('base64'));
 }
 
+/**
+ * ギズモ領域から、赤(X)/緑(Y)/青(Z) の正方向ラベル球の中心を求める。
+ *
+ * 正方向の球は不透明度 1、負方向は 0.4 なので、各色が最も強い画素は正方向の球にある。
+ * ただし球の中心にはラベル文字が暗く描かれていて最輝点が中心からずれるため、
+ * 最輝点の近傍で色が優勢な画素の重心を取って球の中心を出す。
+ * 戻り値はギズモ中心を原点とした座標。
+ */
+async function axisBallPositions(clip) {
+  const buf = await page.screenshot({ clip });
+  return page.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = 'data:image/png;base64,' + b64;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d');
+    g.drawImage(img, 0, 0);
+    const d = g.getImageData(0, 0, c.width, c.height).data;
+
+    const score = (i, k) => {
+      const r = d[i], gg = d[i + 1], b = d[i + 2];
+      if (k === 'X') return r - Math.max(gg, b);
+      if (k === 'Y') return gg - Math.max(r, b);
+      return b - Math.max(r, gg);
+    };
+
+    const out = {};
+    for (const k of ['X', 'Y', 'Z']) {
+      let best = -1, bx = 0, by = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const sc = score(i, k);
+        if (sc > best) { best = sc; bx = (i / 4) % c.width; by = Math.floor(i / 4 / c.width); }
+      }
+      if (best <= 20) { out[k] = null; continue; }
+      // 最輝点の近傍だけを見て重心を取る (反対方向の球を拾わないため)
+      let sx = 0, sy = 0, w = 0;
+      const R = 12;
+      for (let y = Math.max(0, by - R); y <= Math.min(c.height - 1, by + R); y++) {
+        for (let x = Math.max(0, bx - R); x <= Math.min(c.width - 1, bx + R); x++) {
+          const i = (y * c.width + x) * 4;
+          const sc = score(i, k);
+          if (sc > best * 0.5) { sx += x * sc; sy += y * sc; w += sc; }
+        }
+      }
+      out[k] = w > 0
+        ? [Math.round(sx / w - c.width / 2), Math.round(sy / w - c.height / 2)]
+        : [bx - c.width / 2, by - c.height / 2];
+    }
+    return out;
+  }, buf.toString('base64'));
+}
+
 /** Spark のソートは非同期なので、描画が現れるまで待つ */
 async function waitForRender(clip, minPixels = 3000, timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
@@ -121,14 +174,25 @@ check('splat 数が 25% = 7,500', (await page.locator('.panel__info').innerText(
 check('ファイル名が表示される', (await page.locator('.panel__filename').innerText()) === 'verify_sh3.ply');
 
 // 描画領域のみを見る (パネル・ギズモを除いた中央部)
-const viewClip = { x: 300, y: 100, width: 680, height: 560 };
+const viewClip = { x: 290, y: 140, width: 860, height: 620 };
 const s2 = await waitForRender(viewClip, 5000);
 check('splat が描画されている', s2.nonBlack > 5000, `非黒 ${s2.nonBlack}px`);
 
 console.log('\n=== 3. 自動フィット ===');
 check('モデルが画面中央付近に収まる',
-  s2.centroid && Math.abs(s2.centroid[0] - 340) < 130 && Math.abs(s2.centroid[1] - 280) < 130,
-  `重心 ${JSON.stringify(s2.centroid)} (中心は [340,280])`);
+  s2.centroid && Math.abs(s2.centroid[0] - 430) < 170 && Math.abs(s2.centroid[1] - 310) < 170,
+  `重心 ${JSON.stringify(s2.centroid)} (中心は [430,310])`);
+
+console.log('\n=== 3b. 既定の向き (-Y が上 / +X が右) ===');
+{
+  const gclip = { x: 1280 - 132, y: 12, width: 120, height: 120 };
+  const axes = await axisBallPositions(gclip);
+  console.log('  ギズモ中心からの各正方向球:', JSON.stringify(axes));
+  check('+X が画面右を向く', axes.X && axes.X[0] > 6, `X ball dx=${axes.X?.[0]}`);
+  check('+X がほぼ水平 (真右)', axes.X && Math.abs(axes.X[1]) < 14, `X ball dy=${axes.X?.[1]}`);
+  // up = -Y なので、世界の +Y は画面下へ投影される
+  check('-Y が画面上を向く', axes.Y && axes.Y[1] > 6, `+Y ball dy=${axes.Y?.[1]} (下向きが正しい)`);
+}
 
 console.log('\n=== 4. 解像度5段階 ===');
 const expected = [1500, 3600, 7500, 15000, 30000];
@@ -138,6 +202,9 @@ for (let lv = 0; lv < 5; lv++) {
   await page.waitForFunction(
     (w) => document.querySelector('.panel__info')?.textContent?.replace(/[^0-9]/g, '') === String(w),
     expected[lv], { timeout: 60000 });
+  // 件数表示が変わってもキャンバスは 1〜2 フレーム前のサブセットを映していることが
+  // あるため、描画が落ち着くまで待ってから計測する
+  await page.waitForTimeout(1500);
   const stats = await waitForRender(viewClip, 1000);
   counts.push(stats.nonBlack);
   check(`レベル${lv}: ${expected[lv].toLocaleString('ja-JP')} splats`, true, `描画 ${stats.nonBlack}px`);
@@ -178,19 +245,48 @@ const gizmoClip = { x: 1280 - 132, y: 12, width: 120, height: 120 };
 const gz = await shotStats(gizmoClip);
 check('ギズモが描画されている', gz.nonBlack > 100, `非黒 ${gz.nonBlack}px`);
 const viewA = await shotStats(viewClip);
-// デバッグで確認済みの各軸ラベル球の位置 (ギズモ中心からのオフセット)
-const AXIS_OFFSETS = { '+X': [-27, 10], '+Z': [25, 10], '+Y': [-1, 33] };
+// 球の位置は視点で変わるので、その都度色から探して押す
 const shapes = { 初期: viewA.bbox };
-for (const [name, [dx, dy]] of Object.entries(AXIS_OFFSETS)) {
-  await page.mouse.click(1280 - 132 + 60 + dx, 12 + 60 + dy);
-  await page.waitForTimeout(900);
-  shapes[name] = (await shotStats(viewClip)).bbox;
+for (const axis of ['X', 'Y', 'Z']) {
+  const found = await axisBallPositions(gizmoClip);
+  const p = found[axis];
+  if (!p) { shapes['+' + axis] = null; continue; }
+  await page.mouse.click(1280 - 132 + 60 + p[0], 12 + 60 + p[1]);
+  await page.waitForTimeout(1100);
+  shapes['+' + axis] = (await shotStats(viewClip)).bbox;
 }
 console.log('  投影bbox:', Object.entries(shapes).map(([k, v]) => `${k}=${v?.join('x')}`).join('  '));
 const ratios = Object.entries(shapes).map(([k, v]) => [k, v ? v[0] / v[1] : 0]);
 const distinct = new Set(ratios.map(([, r]) => r.toFixed(1))).size;
 check('軸クリックで投影形状が変わる', distinct >= 3,
   `縦横比 ${ratios.map(([k, r]) => `${k}=${r.toFixed(2)}`).join(' ')}`);
+
+console.log('\n=== 7b. 極を越えて回転し続けられる ===');
+{
+  // 画面中央から真下へ長距離ドラッグする。OrbitControls だと極角がクランプされ、
+  // 真上/真下に達したところで画像が固まる。
+  const gclip = { x: 1280 - 132, y: 12, width: 120, height: 120 };
+  await page.mouse.move(640, 400);
+  await page.mouse.down();
+  const seen = [];
+  for (let step = 0; step < 14; step++) {
+    await page.mouse.move(640, 400 + (step + 1) * 90, { steps: 6 });
+    await page.waitForTimeout(260);
+    const a = await axisBallPositions(gclip);
+    seen.push(a.Y ? `${a.Y[0]},${a.Y[1]}` : 'none');
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+
+  const firstHalf = new Set(seen.slice(0, 7));
+  const lastHalf = new Set(seen.slice(7));
+  console.log('  ドラッグ中の +Y 球の軌跡:', seen.join(' -> '));
+  check('前半で向きが変化する', firstHalf.size >= 4, `${firstHalf.size} 通り`);
+  check('後半でも向きが変化し続ける (極で固まらない)', lastHalf.size >= 4, `${lastHalf.size} 通り`);
+  check('最後まで同じ向きに張り付かない',
+    seen[seen.length - 1] !== seen[seen.length - 2] || seen[seen.length - 2] !== seen[seen.length - 3],
+    seen.slice(-3).join(' | '));
+}
 
 console.log('\n=== 8. SH次数0 PLY (.ply, SHなし) ===');
 await page.locator('.panel__actions .button').first().click();
