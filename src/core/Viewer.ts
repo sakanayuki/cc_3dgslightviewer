@@ -4,6 +4,7 @@ import { BACKGROUND_COLORS, DEFAULT_BACKGROUND } from '../config';
 import { CameraController } from '../camera/CameraController';
 import { AxisGizmo } from '../gizmo/AxisGizmo';
 import { VrSession } from '../vr/VrSession';
+import { computeVrPlacement } from '../vr/placement';
 import { S } from '../ui/strings';
 import { ViewerError } from '../types';
 import type { SceneBounds } from '../types';
@@ -28,6 +29,8 @@ export class Viewer {
 
   private readonly sparkRenderer: SparkRenderer;
   private mesh: SplatMesh | null = null;
+  /** 直近の自動フィット結果。VR 入場時の配置計算に使う */
+  private bounds: SceneBounds | null = null;
   private lastFrameTime = performance.now();
   private vrActive = false;
 
@@ -66,12 +69,14 @@ export class Viewer {
         this.vrActive = true;
         this.gizmo.visible = false;
         this.camControls.setEnabled(false);
+        this.applyVrPlacement();
         onVrChange(true);
       },
       onExit: () => {
         this.vrActive = false;
         this.gizmo.visible = true;
         this.camControls.setEnabled(true);
+        this.resetWorldRoot();
         onVrChange(false);
       },
     });
@@ -125,13 +130,34 @@ export class Viewer {
     this.mesh = null;
   }
 
-  /** 自動フィット。VR の移動速度もシーンのスケールに合わせる */
+  /** 自動フィット */
   fitTo(bounds: SceneBounds): void {
+    this.bounds = bounds;
     this.camControls.fit(bounds);
-    this.vr.setSceneRadius(bounds.radius);
+    this.resetWorldRoot();
+    if (this.vrActive) this.applyVrPlacement();
+  }
+
+  private resetWorldRoot(): void {
     this.worldRoot.position.set(0, 0, 0);
     this.worldRoot.quaternion.identity();
     this.worldRoot.scale.setScalar(1);
+  }
+
+  /**
+   * VR 入場時にモデルを XR 空間へ配置し直す。
+   *
+   * VR ではカメラ姿勢がヘッドセットから与えられるため camera.up が効かない。
+   * 「-Y が上・+X が右」を VR でも成立させるには worldRoot 側を回すしかない。
+   * あわせて、3DGS の単位を持たない座標スケールを実寸に正規化し、
+   * 目の前の見やすい位置へ移動する。
+   */
+  private applyVrPlacement(): void {
+    if (!this.bounds) return;
+    const placement = computeVrPlacement(this.bounds);
+    this.worldRoot.position.copy(placement.position);
+    this.worldRoot.quaternion.copy(placement.quaternion);
+    this.worldRoot.scale.setScalar(placement.scale);
   }
 
   start(): void {

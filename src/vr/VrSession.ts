@@ -71,9 +71,9 @@ export class VrSession {
     return this.session !== undefined;
   }
 
-  /** 移動速度をシーンのスケールに追従させる */
-  setSceneRadius(radius: number): void {
-    this.locomotion.sceneRadius = radius;
+  /** スティック移動の速度 [m/s] を設定する */
+  setMoveSpeed(metersPerSecond: number): void {
+    this.locomotion.moveSpeed = metersPerSecond;
   }
 
   async enter(): Promise<void> {

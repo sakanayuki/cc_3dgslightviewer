@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  VR_MOVE_SPEED_RATIO,
+  VR_MOVE_SPEED_MPS,
   VR_SNAP_ANGLE_DEG,
   VR_SNAP_OFF_THRESHOLD,
   VR_SNAP_ON_THRESHOLD,
@@ -25,8 +25,11 @@ function deadzone(v: number): number {
  * - 左トリガー: ダッシュ / 右トリガー: 微調整
  */
 export class Locomotion {
-  /** シーン半径。移動速度をスケールに追従させるために使う */
-  sceneRadius = 1;
+  /**
+   * 移動速度 [m/s]。VR 入場時にモデルを実寸へ正規化するため、
+   * シーン半径からの相対値ではなく実際の毎秒移動量で持つ。
+   */
+  moveSpeed = VR_MOVE_SPEED_MPS;
   private snapLatched = false;
 
   constructor(private readonly rig: THREE.Group) {}
@@ -57,7 +60,7 @@ export class Locomotion {
     const y = deadzone(pad.axes[AXIS_Y] ?? 0);
     if (x === 0 && y === 0) return;
 
-    let speed = this.sceneRadius * VR_MOVE_SPEED_RATIO;
+    let speed = this.moveSpeed;
     if (pressed(left, BUTTON_TRIGGER)) speed *= 3;
     if (pressed(right, BUTTON_TRIGGER)) speed *= 0.3;
 

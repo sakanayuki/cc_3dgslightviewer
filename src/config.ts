@@ -82,8 +82,24 @@ export const GIZMO_MARGIN = 12;
 export const GIZMO_SNAP_DURATION_MS = 400;
 
 // ── VR ────────────────────────────────────────────────────────
-/** シーン半径に対する毎秒移動量。スケール差に追従させるため比率で持つ */
-export const VR_MOVE_SPEED_RATIO = 0.15;
+/**
+ * VR に入ったときのモデルの見かけ半径 [m]。
+ *
+ * 3DGS の座標スケールは学習パイプライン由来で単位を持たないため、そのまま
+ * XR 空間に置くと「巨大すぎて中に埋もれる」か「足元の点」になってしまう。
+ * 実寸に正規化して、目の前の卓上模型くらいの大きさで出す。
+ * 大きくしたい場合は両手グラブで拡大できる。
+ */
+export const VR_TARGET_RADIUS = 1.0;
+/** VR に入ったときのモデル中心の高さ [m] */
+export const VR_MODEL_HEIGHT = 1.4;
+/** VR に入ったときのモデル中心までの距離 [m] (XR の -Z が正面) */
+export const VR_MODEL_DISTANCE = 2.0;
+/**
+ * スティック移動の速度 [m/s]。VR ではモデルを実寸に正規化するため、
+ * シーン半径からの相対値ではなく実際の毎秒移動量で持つ。
+ */
+export const VR_MOVE_SPEED_MPS = 1.5;
 export const VR_SNAP_ANGLE_DEG = 30;
 export const VR_SNAP_ON_THRESHOLD = 0.7;
 export const VR_SNAP_OFF_THRESHOLD = 0.3;
