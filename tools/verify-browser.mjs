@@ -338,13 +338,23 @@ check('未捕捉の例外なし', errs.length === 0, errs.slice(0, 3).join(' | '
 
 console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替えて検証) ===');
 {
-  // 実機が無くても UI の分岐だけは確認できるよう、navigator.xr を差し替える
+  // 実機が無くても UI の分岐だけは確認できるよう、navigator.xr を差し替える。
+  // 加えて requestSession に渡されたセッション種別を記録し、実際に要求する
+  // モードが端末の対応状況と一致しているかを確かめる。
   const openWith = async (modes) => {
     const p2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await p2.addInitScript((supported) => {
+      window.__requested = [];
       Object.defineProperty(navigator, 'xr', {
         configurable: true,
-        value: { isSessionSupported: async (m) => supported.includes(m) },
+        value: {
+          isSessionSupported: async (m) => supported.includes(m),
+          requestSession: async (m) => {
+            window.__requested.push(m);
+            // 実際のセッションは張らず、要求だけ記録して失敗させる
+            throw new Error('test stub');
+          },
+        },
       });
     }, modes);
     await p2.goto(`http://localhost:${port}${BASE}`, { waitUntil: 'load' });
@@ -355,31 +365,59 @@ console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替
     return p2;
   };
 
-  // (a) XR 非対応
+  // (a) XR 非対応 (通常のデスクトップ)
   let p2 = await openWith([]);
-  check('XR 非対応なら VR ボタンを出さない', await p2.locator('.button--vr').isHidden());
-  check('XR 非対応なら VR背景の選択も出さない', await p2.locator('#xr-background-select').isHidden());
+  check('XR 非対応: ボタンを出さない', await p2.locator('.button--vr').isHidden());
+  check('XR 非対応: VR背景の選択も出さない', await p2.locator('#xr-background-select').isHidden());
   await p2.close();
 
-  // (b) VR のみ対応 (パススルー非対応)
+  // (b) ヘッドセット: VR のみ対応 (パススルー非対応)
   p2 = await openWith(['immersive-vr']);
-  check('VR 対応なら VR ボタンを出す', await p2.locator('.button--vr').isVisible());
-  check('VR 対応なら VR背景の選択を出す', await p2.locator('#xr-background-select').isVisible());
-  check('パススルー非対応なら選択肢を無効化する',
-    await p2.locator('#xr-background-select option[value=passthrough]').isDisabled());
-  check('パススルー非対応なら理由を表示する',
+  check('VRのみ: ラベルが「VRで見る」',
+    (await p2.locator('.button--vr').innerText()) === 'VRで見る');
+  check('VRのみ: 背景の選択は出さない', await p2.locator('#xr-background-select').isHidden());
+  check('VRのみ: パススルー非対応の理由を出す',
     (await p2.locator('.panel__note--muted').innerText()).includes('パススルー'));
-  check('既定は背景色 (不透明)', (await p2.locator('#xr-background-select').inputValue()) === 'vr');
+  await p2.locator('.button--vr').click();
+  await p2.waitForTimeout(400);
+  check('VRのみ: immersive-vr を要求する',
+    JSON.stringify(await p2.evaluate(() => window.__requested)) === '["immersive-vr"]',
+    JSON.stringify(await p2.evaluate(() => window.__requested)));
   await p2.close();
 
-  // (c) VR とパススルーの両対応
+  // (c) Android スマートフォン: immersive-ar のみ対応
+  p2 = await openWith(['immersive-ar']);
+  check('ARのみ: ボタンを出す', await p2.locator('.button--vr').isVisible());
+  check('ARのみ: ラベルが「ARで見る」',
+    (await p2.locator('.button--vr').innerText()) === 'ARで見る',
+    await p2.locator('.button--vr').innerText());
+  check('ARのみ: 背景の選択は出さない (常にカメラ映像)',
+    await p2.locator('#xr-background-select').isHidden());
+  check('ARのみ: 使い方の注記を出す',
+    (await p2.locator('.panel__note--muted').innerText()).includes('カメラ映像'));
+  await p2.locator('.button--vr').click();
+  await p2.waitForTimeout(400);
+  const requested = await p2.evaluate(() => window.__requested);
+  check('ARのみ: immersive-ar を要求する (immersive-vr ではない)',
+    JSON.stringify(requested) === '["immersive-ar"]', JSON.stringify(requested));
+  check('ARのみ: 失敗時に AR 用のエラーを出す',
+    (await p2.locator('.overlay--error .overlay__title').innerText()).includes('AR を開始できません'),
+    await p2.locator('.overlay--error .overlay__title').innerText());
+  await p2.close();
+
+  // (d) ヘッドセット: VR とパススルーの両対応
   p2 = await openWith(['immersive-vr', 'immersive-ar']);
-  check('パススルー対応なら選択肢が有効',
-    !(await p2.locator('#xr-background-select option[value=passthrough]').isDisabled()));
-  check('パススルー対応なら注記を出さない', await p2.locator('.panel__note--muted').isHidden());
+  check('両対応: ラベルが「VRで見る」',
+    (await p2.locator('.button--vr').innerText()) === 'VRで見る');
+  check('両対応: 背景の選択を出す', await p2.locator('#xr-background-select').isVisible());
+  check('両対応: 注記は出さない', await p2.locator('.panel__note--muted').isHidden());
+  check('両対応: 既定は背景色', (await p2.locator('#xr-background-select').inputValue()) === 'vr');
   await p2.selectOption('#xr-background-select', 'passthrough');
-  check('パススルーを選択できる',
-    (await p2.locator('#xr-background-select').inputValue()) === 'passthrough');
+  await p2.locator('.button--vr').click();
+  await p2.waitForTimeout(400);
+  const req2 = await p2.evaluate(() => window.__requested);
+  check('両対応: パススルーを選ぶと immersive-ar を要求する',
+    JSON.stringify(req2) === '["immersive-ar"]', JSON.stringify(req2));
   await p2.close();
 }
 

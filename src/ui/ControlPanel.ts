@@ -21,6 +21,7 @@ export class ControlPanel {
   private readonly xrRow: HTMLElement;
   private readonly xrSelect: HTMLSelectElement;
   private readonly xrNote: HTMLElement;
+  private support: XrSupport = { vr: false, passthrough: false };
 
   constructor(private readonly cb: ControlPanelCallbacks) {
     this.root = document.createElement('div');
@@ -156,36 +157,73 @@ export class ControlPanel {
     this.select.disabled = busy;
   }
 
-  /** 選択中の VR 背景 */
+  /**
+   * 実際に要求する XR セッションの種類。
+   *
+   * ヘッドセット (VR と パススルーの両対応) では「VR背景」の選択に従う。
+   * スマートフォンは immersive-ar にしか対応しないため、選択に関係なく
+   * 常に passthrough (= immersive-ar) を返す。ここを取り違えると、
+   * スマホで immersive-vr を要求して必ず失敗する。
+   */
   get xrMode(): XrMode {
+    if (!this.support.vr) return 'passthrough';
+    if (!this.support.passthrough) return 'vr';
     return this.xrSelect.value === 'passthrough' ? 'passthrough' : 'vr';
+  }
+
+  /** ヘッドセットの VR ではなく、スマートフォンの AR として扱うか */
+  private get isArOnly(): boolean {
+    return !this.support.vr && this.support.passthrough;
   }
 
   /**
    * 端末の XR 対応状況を反映する。
-   * パススルーは immersive-ar として提供されるため、VR とは別に判定される。
+   *
+   * - ヘッドセット (VR 対応)      : 「VRで見る」。両対応なら背景を選べる
+   * - スマートフォン (AR のみ対応) : 「ARで見る」。背景は常にカメラ映像なので選択肢を出さない
+   * - 非対応                      : ボタンごと出さない
+   *
+   * パススルー / AR は immersive-ar として提供されるため、VR とは別に判定する。
    */
   setXrSupport(support: XrSupport): void {
+    this.support = support;
     const available = support.vr || support.passthrough;
     this.vrButton.hidden = !available;
-    this.xrRow.hidden = !available;
+    this.vrButton.textContent = this.isArOnly ? S.buttonEnterAr : S.buttonEnterVr;
 
-    const passthroughOption = this.xrSelect.options[1];
-    if (passthroughOption) passthroughOption.disabled = !support.passthrough;
-    if (!support.passthrough) this.xrSelect.value = 'vr';
+    // 背景の選択はヘッドセットで両方に対応しているときだけ意味がある
+    const canChooseBackground = support.vr && support.passthrough;
+    this.xrRow.hidden = !canChooseBackground;
+    if (!canChooseBackground) this.xrSelect.value = support.vr ? 'vr' : 'passthrough';
 
-    this.xrNote.hidden = !available || support.passthrough;
-    this.xrNote.textContent = available && !support.passthrough
-      ? S.xrPassthroughUnsupported
-      : '';
+    if (!available) {
+      this.xrNote.hidden = true;
+      this.xrNote.textContent = '';
+      return;
+    }
+    // AR のみなら使い方、VR のみならパススルー非対応の理由を出す
+    const note = this.isArOnly
+      ? S.arHint
+      : support.passthrough
+        ? ''
+        : S.xrPassthroughUnsupported;
+    this.xrNote.hidden = note === '';
+    this.xrNote.textContent = note;
   }
 
-  /** VR 中は解像度を変更できない (設計書 11.1) */
+  /** VR / AR 中は解像度を変更できない (設計書 11.1) */
   setVrActive(active: boolean): void {
-    this.vrButton.textContent = active ? S.buttonExitVr : S.buttonEnterVr;
+    const ar = this.isArOnly;
+    this.vrButton.textContent = active
+      ? ar
+        ? S.buttonExitAr
+        : S.buttonExitVr
+      : ar
+        ? S.buttonEnterAr
+        : S.buttonEnterVr;
     this.select.disabled = active;
     this.xrSelect.disabled = active;
     this.note.hidden = !active;
-    this.note.textContent = active ? S.vrResolutionLocked : '';
+    this.note.textContent = active ? (ar ? S.arResolutionLocked : S.vrResolutionLocked) : '';
   }
 }

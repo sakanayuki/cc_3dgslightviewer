@@ -172,8 +172,9 @@ class App {
       if (this.viewer.vr.isActive) await this.viewer.vr.exit();
       else await this.viewer.vr.enter(mode);
     } catch (e) {
-      console.error('[main] VR セッションの開始に失敗しました', e);
-      this.overlay.showError(S.errXrStartFailed, () => this.overlay.hide());
+      console.error('[main] XR セッションの開始に失敗しました', e);
+      const message = mode === 'passthrough' ? S.errArStartFailed : S.errXrStartFailed;
+      this.overlay.showError(message, () => this.overlay.hide());
     }
   }
 
