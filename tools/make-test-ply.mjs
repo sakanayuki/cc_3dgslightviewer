@@ -27,8 +27,15 @@ export function makePly(n, shDegree, shape = 'slab') {
   // 軸ごとの広がり。slab は X:Y:Z = 10:1.5:5 と大きく異なる
   const extent = shape === 'cube' ? [5, 5, 5] : [10, 1.5, 5];
 
+  // mulberry32。以前は素朴な LCG を使っていたが、seed * 1103515245 が 2^53 を
+  // 超えて精度が落ち、乱数列が縮退して splat の位置が大量に重複していた。
   let seed = 12345;
-  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const rnd = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 
   for (let i = 0; i < n; i++) {
     const o = i * stride;

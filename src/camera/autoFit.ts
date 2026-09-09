@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { ExtSplats } from '@sparkjsdev/spark';
+import type { PackedSplats } from '@sparkjsdev/spark';
 import {
   AUTOFIT_MARGIN,
   DEFAULT_ELEVATION_DEG,
@@ -17,7 +17,7 @@ import type { SceneBounds } from '../types';
  * splat の中心座標を最大 AUTOFIT_SAMPLE_COUNT 件まで等間隔サンプリングする。
  * 返り値は [x0,y0,z0, x1,y1,z1, ...] のフラット配列。
  */
-export function sampleCenters(splats: ExtSplats): Float32Array {
+export function sampleCenters(splats: PackedSplats): Float32Array {
   const n = splats.numSplats;
   const step = Math.max(1, Math.ceil(n / AUTOFIT_SAMPLE_COUNT));
   const count = Math.ceil(n / step);

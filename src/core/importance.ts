@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import type { ExtSplats } from '@sparkjsdev/spark';
+import type { PackedSplats } from '@sparkjsdev/spark';
 import {
   IMPORTANCE_AREA_EXPONENT,
   IMPORTANCE_HISTOGRAM_BINS,
@@ -142,7 +142,7 @@ export function buildRankingFromScores(scores: Float32Array): Ranking {
  * PackedSplats を走査してスコアを計算する。
  * forEachSplat が渡すオブジェクトは使い回されるため、保持せず即座に数値を読む。
  */
-export function computeScores(splats: ExtSplats): Float32Array {
+export function computeScores(splats: PackedSplats): Float32Array {
   const n = splats.numSplats;
   const scores = new Float32Array(n);
   splats.forEachSplat(
@@ -161,6 +161,6 @@ export function computeScores(splats: ExtSplats): Float32Array {
   return scores;
 }
 
-export function buildRanking(splats: ExtSplats): Ranking {
+export function buildRanking(splats: PackedSplats): Ranking {
   return buildRankingFromScores(computeScores(splats));
 }

@@ -10,7 +10,6 @@
 - **対応形式** — `.ply`（未圧縮 / 圧縮）、`.splat`
 - **解像度5段階** — 最低 / 低 / 中 / 高 / オリジナル。低スペックPC向けに既定は「中」（25%）
 - **重要度順の間引き** — 不透明度と投影面積からスコアを付け、小さく薄い splat から削るため低レートでも輪郭が保たれます
-- **高精度な内部表現** — splat の位置を float32 で保持します（Spark の既定の float16 表現では、細かいディテールを持つデータで斑点状の抜けが出ます）
 - **XYZ軸ギズモ** — 右上に表示。軸をクリックするとその方向からの視点へスナップします
 - **既定の向き** — -Y 軸が画面上、+X 軸が画面右。読み込み時に自動でシーン全体が収まる位置へ移動します
 - **VRモード** — WebXR 対応。Meta Quest 2 のコントローラで移動・グラブ操作ができます
@@ -133,6 +132,19 @@ node tools/verify-browser.mjs        # CHROMIUM_PATH で実行ファイルを指
 `main` への push で GitHub Actions が lint / typecheck / test / build を実行し、
 GitHub Pages へ公開します。リポジトリの Settings → Pages → Source が
 **GitHub Actions** になっている必要があります。
+
+## 表示がおかしいとき
+
+面に細かい亀裂状・斑点状の抜けが出る場合、データ側の被覆不足の可能性があります。
+検査ツールで確認できます。
+
+```bash
+node tools/check-splat-coverage.mjs your-file.splat
+```
+
+「最近傍距離 / σ」の p90 が 1.0 を超えていると、splat が隣と十分に重ならず面が塞がりません。
+データ提供者へ渡す説明は [docs/splat-data-requirements.md](docs/splat-data-requirements.md)
+にまとめてあります。
 
 ## 設計
 

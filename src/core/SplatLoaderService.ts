@@ -1,4 +1,4 @@
-import { ExtSplats, getSplatFileType, SplatFileType } from '@sparkjsdev/spark';
+import { PackedSplats, getSplatFileType, SplatFileType } from '@sparkjsdev/spark';
 import { KEEP_FULL_IN_MEMORY, PROGRESS_YIELD_INTERVAL_MS, SNIFF_BYTES } from '../config';
 import { S } from '../ui/strings';
 import { ViewerError } from '../types';
@@ -48,8 +48,8 @@ export async function parseFile(
   file: File,
   fileType: SplatFileType,
   onProgress: ProgressCallback,
-): Promise<ExtSplats> {
-  const splats = new ExtSplats({
+): Promise<PackedSplats> {
+  const splats = new PackedSplats({
     stream: file.stream() as unknown as ReadableStream,
     streamLength: file.size,
     fileType,
@@ -88,7 +88,7 @@ export function toViewerError(e: unknown): ViewerError {
  * 定期的に UI スレッドへ制御を返す。
  */
 export async function buildRankingAsync(
-  splats: ExtSplats,
+  splats: PackedSplats,
   onProgress: ProgressCallback,
 ): Promise<Ranking> {
   onProgress({ phase: 'analyzing', ratio: 0 });
@@ -115,7 +115,7 @@ export async function buildRankingAsync(
  * この分岐はこのクラス内に閉じ込め、呼び出し側からは見えないようにしている。
  */
 export class FullSplatsProvider {
-  private cached: ExtSplats | null = null;
+  private cached: PackedSplats | null = null;
 
   constructor(
     private readonly file: File,
@@ -123,20 +123,20 @@ export class FullSplatsProvider {
   ) {}
 
   /** 初回パース結果を渡す。常駐モードならここでキャッシュする */
-  adoptInitial(splats: ExtSplats): void {
+  adoptInitial(splats: PackedSplats): void {
     if (KEEP_FULL_IN_MEMORY) this.cached = splats;
   }
 
   /**
    * フルデータを取得する。呼び出し側は使い終わったら必ず release() を呼ぶこと。
    */
-  async acquire(onProgress: ProgressCallback): Promise<ExtSplats> {
+  async acquire(onProgress: ProgressCallback): Promise<PackedSplats> {
     if (this.cached) return this.cached;
     return parseFile(this.file, this.fileType, onProgress);
   }
 
   /** acquire() で得たフルデータを解放する。常駐モードでは何もしない */
-  release(splats: ExtSplats): void {
+  release(splats: PackedSplats): void {
     if (this.cached === splats) return;
     splats.dispose();
   }
