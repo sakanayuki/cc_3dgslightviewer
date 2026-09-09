@@ -1,4 +1,4 @@
-import type { PackedSplats } from '@sparkjsdev/spark';
+import type { ExtSplats } from '@sparkjsdev/spark';
 import { DEFAULT_LEVEL } from './config';
 import { computeBounds, sampleCenters } from './camera/autoFit';
 import { effectiveMaxSh, selectIndices } from './core/levels';
@@ -63,7 +63,7 @@ class App {
     this.dropZone.setVisible(false);
     this.overlay.showProgress(file.name, file.size, { phase: 'reading', ratio: 0 });
 
-    let full: PackedSplats | null = null;
+    let full: ExtSplats | null = null;
     try {
       // 1. 形式判定 (大きなファイルを読む前に弾く)
       const fileType = await detectFileType(file);
@@ -130,7 +130,7 @@ class App {
     this.panel.setBusy(true);
     this.overlay.showProgress(model.file.name, model.file.size, { phase: 'reading', ratio: 0 });
 
-    let full: PackedSplats | null = null;
+    let full: ExtSplats | null = null;
     try {
       full = await provider.acquire(this.progress);
 

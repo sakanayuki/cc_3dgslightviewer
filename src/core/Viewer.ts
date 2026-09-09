@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PackedSplats, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+import { ExtSplats, SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
 import { BACKGROUND_COLORS, DEFAULT_BACKGROUND } from '../config';
 import { CameraController } from '../camera/CameraController';
 import { AxisGizmo } from '../gizmo/AxisGizmo';
@@ -59,7 +59,13 @@ export class Viewer {
     this.rig.add(this.camera);
     this.scene.add(this.rig, this.worldRoot);
 
-    this.sparkRenderer = new SparkRenderer({ renderer: this.renderer });
+    this.sparkRenderer = new SparkRenderer({
+      renderer: this.renderer,
+      // アキュムレータも 32 バイト表現にする。既定 (false) では、描画直前に
+      // 全 splat を 16 バイト形式へ再量子化してしまい、位置が float16 に落ちる。
+      // ここを true にしないと ExtSplats で読み込む意味が無くなる。
+      accumExtSplats: true,
+    });
     this.scene.add(this.sparkRenderer);
 
     this.camControls = new CameraController(this.camera, canvas);
@@ -150,9 +156,9 @@ export class Viewer {
   }
 
   /** 描画中の SplatMesh を差し替える。旧メッシュは破棄する */
-  setSplats(splats: PackedSplats): SplatMesh {
+  setSplats(splats: ExtSplats): SplatMesh {
     this.clearSplats();
-    const mesh = new SplatMesh({ packedSplats: splats });
+    const mesh = new SplatMesh({ splats });
     this.worldRoot.add(mesh);
     this.mesh = mesh;
     return mesh;

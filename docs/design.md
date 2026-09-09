@@ -5,7 +5,7 @@
 
 - 対象リポジトリ: `sakanayuki/cc_3dgslightviewer`
 - 公開先: https://sakanayuki.github.io/cc_3dgslightviewer/
-- 本書バージョン: 1.5 (Android スマートフォンの AR モードを追加)
+- 本書バージョン: 1.6 (斑点状の描画不良の修正: ExtSplats への切り替え)
 - 最終更新: 2026-09-06
 
 ---
@@ -71,29 +71,49 @@ VR内での解像度変更UI / 一人称ウォークモード / 姿勢補正UI /
 
 ### 2.3 Spark の内部データ表現（実装の前提知識）
 
-`PackedSplats` は以下の構造を持つ。**本設計の間引き実装はこの構造に依存する。**
+Spark には splat の内部表現が 2 つある。**本アプリは精度の高い `ExtSplats` を使う。**
 
-| 配列 | 型 | 1 splat あたり | 内容 |
-|---|---|---|---|
-| `packedArray` | `Uint32Array` | **4 ワード = 16 バイト** | 位置・スケール・回転・不透明度・DC色 |
-| `extra.sh1` | `Uint32Array` | **2 ワード = 8 バイト** | SH 次数1 |
-| `extra.sh2` | `Uint32Array` | **4 ワード = 16 バイト** | SH 次数2 |
-| `extra.sh3` | `Uint32Array` | **4 ワード = 16 バイト** | SH 次数3 |
+| | `PackedSplats` (16 B/splat) | **`ExtSplats` (32 B/splat)** |
+|---|---|---|
+| 位置 | **float16** | **float32** |
+| スケール | 8 bit の対数量子化（ln 範囲 -12〜9 を 254 段） | float16 の対数 |
+| 回転 | oct 8+8+8 bit | oct 10+10+12 bit |
+| 色・不透明度 | 8 bit | float16 |
+| 配列 | `packedArray: Uint32Array` 4 ワード | `extArrays: [Uint32Array, Uint32Array]` 各 4 ワード |
 
-- 合計: SH次数0 で 16 B/splat、SH次数3 フルで **56 B/splat**。
-- 量子化の基準値は `splatEncoding`（`rgbMin/rgbMax`、`lnScaleMin/lnScaleMax`、`sh1Max` 等）に保持される。
-  **サブセットを作る際は `splatEncoding` を必ず引き継ぐこと。**引き継がないと色とスケールが壊れる。
-- 配列長はテクスチャ都合で `getTextureSize()` により切り上げられる。`numSplats` が実データ数、`packedArray.length / 4` は確保容量であり**一致しない**。
-- **`packedArray` の容量は `SPLAT_TEX_WIDTH`（= 2^11 = 2048）splat の倍数でなければならない。**
-  `PackedSplats.initialize()` は
-  `maxSplats = floor(floor(packedArray.length / 4) / SPLAT_TEX_WIDTH) * SPLAT_TEX_WIDTH`
-  と切り**下げ**るため、2048 未満の配列を渡すと `maxSplats` も `numSplats` も 0 になり、
-  例外も出さずに何も描画されない。Spark はこの定数を公開していないので、
-  `config.ts` の `SPLAT_TEX_WIDTH` に持ち、`subset.ts` で
-  「構築後の `numSplats` が期待値と一致するか」を実行時に検証して黙って壊れないようにする。
-  （実装時のスパイクで判明。最初はこれを知らず `numSplats = 0` になった）
+**`PackedSplats` を使わない理由**（実データで確認した不具合）:
 
----
+位置が float16 だと、量子化の刻みは座標の大きさに比例して `|座標| × 約 4.9e-4` になる。
+広がりに対して splat が小さいデータでは、この刻みが splat の σ に対して無視できない
+大きさになり、**splat が規則的な格子に吸着して斑点状・縞状の抜けが出る**。
+
+実測（広がり 1.0 / σ 中央値 0.0008 の `.splat`、351,605 splats）:
+
+| | `PackedSplats` | `ExtSplats` |
+|---|---|---|
+| 位置誤差 / σ (中央値) | 6.2% | **0** |
+| 位置誤差 / σ (p99) | 24.3% | **0** |
+| 位置誤差 / σ (最大) | **34.8%** | **0** |
+| スケール誤差 (最大) | 4.2% | 0.20% |
+
+発生条件は `|座標| / σ` が大きいこと。細かいディテールを広い範囲に持つスキャンほど
+影響が出るため、「一部のファイルでだけ起きる」という症状になる。
+
+**`SparkRenderer` の `accumExtSplats: true` も必須。** 描画直前に全 splat をまとめる
+アキュムレータは既定（`false`）で 16 バイト形式を使うため、これを立てないと
+`ExtSplats` で読み込んでも描画前に位置が float16 へ再量子化されてしまう。
+
+その他の前提:
+
+- 配列長はテクスチャ都合で切り上げられる。`numSplats` が実データ数、
+  `extArrays[0].length / 4` は確保容量であり**一致しない**。
+- **`extArrays` の容量は `SPLAT_TEX_WIDTH`（= 2^11 = 2048）splat の倍数でなければならない。**
+  `initialize()` が容量を 2048 単位に切り**下げ**るため、2048 未満の配列を渡すと
+  `numSplats` が 0 になり、例外も出さずに何も描画されない。Spark はこの定数を
+  公開していないので `config.ts` に持ち、`subset.ts` で構築後の `numSplats` を
+  実行時に検証して黙って壊れないようにする。
+- SH は `extra` に入る。**次数 3 だけ `sh3a` / `sh3b` の 2 枚に分かれる**
+  （`PackedSplats` の `sh3` 一枚とは構成が違う）。どの配列も 4 ワード/splat。
 
 ## 3. 全体アーキテクチャ
 
@@ -288,31 +308,31 @@ Spark 標準の `PackedSplats.extractSplats()` は **SH を落とす**（内部�
 ```ts
 // subset.ts
 export function buildSubset(
-  src: PackedSplats,
+  src: ExtSplats,
   keep: Uint32Array,   // 昇順のソース側インデックス
   maxSh: 0 | 1 | 2 | 3,
-): PackedSplats
+): ExtSplats
 ```
 
 処理手順:
 
 1. `n = keep.length` とする。
-2. `packedArray` を新規に `Uint32Array(n * 4)` で確保し、
-   各 `d`（0..n-1）について `src.packedArray` の `keep[d]*4 .. keep[d]*4+3` を `d*4 ..` へコピー。
-3. `level = 1..maxSh` の各段について、`src.extra['sh'+level]` が存在すれば
-   同様に `wordsPerSplat`（sh1=2, sh2=4, sh3=4）単位でコピーし `extra` に格納。
-4. 以下のオプションで `PackedSplats` を構築する:
+2. `extArrays` の 2 枚をそれぞれ `Uint32Array(容量 * 4)` で確保し、
+   各 `d`（0..n-1）について `keep[d]*4 .. keep[d]*4+3` を `d*4 ..` へコピー。
+   容量は `alignCapacity()` で 2048 splat 単位に切り上げる。
+3. `level = 1..maxSh` の各段について、その段の配列
+   （次数1→`sh1`、次数2→`sh2`、次数3→`sh3a` と `sh3b`）を 4 ワード単位でコピーし
+   `extra` に格納。
+4. 以下のオプションで `ExtSplats` を構築する:
 
 ```ts
-new PackedSplats({
-  packedArray,
-  numSplats: n,
-  splatEncoding: src.splatEncoding,  // 必須。省略すると色とスケールが壊れる
-  extra,
-})
+new ExtSplats({ extArrays: [dstA, dstB], numSplats: n, extra })
 ```
 
-5. 生成後に `dst.setMaxSh(maxSh)` を呼ぶ。
+   `PackedSplats` と違い量子化の基準値（`splatEncoding`）を持たないので、
+   引き継ぎ漏れによる破損の心配が無い。
+
+5. 構築後の `numSplats` が期待値と一致するか検証し、`dst.setMaxSh(maxSh)` を呼ぶ。
 
 ### 7.3 スパイクの結果（実装済み）
 
@@ -351,20 +371,26 @@ new PackedSplats({
 
 #### 前提となるメモリ実測値（300万splat / SH次数3 の場合）
 
+`ExtSplats`（32 B/splat、位置 float32）を使う。`PackedSplats`（16 B/splat）より
+メモリは増えるが、2.3 のとおり位置が float16 では描画が破綻するため必要な代償。
+
 | 保持内容 | サイズ |
 |---|---|
-| `packedArray` (16 B/splat) | 48 MB |
-| SH フル (40 B/splat) | 120 MB |
-| **フル常駐の合計** | **168 MB** |
-| Level 0（5%・SH次数0）のサブセット | 約 2.4 MB |
-| Level 2（25%・SH次数1）のサブセット | 約 18 MB |
+| `extArrays` (32 B/splat) | 96 MB |
+| SH フル (sh1/sh2/sh3a/sh3b 各 16 B = 64 B/splat) | 192 MB |
+| **フル常駐の合計** | **288 MB** |
+| Level 0（5%・SH次数0）のサブセット | 約 4.8 MB |
+| Level 2（25%・SH次数1）のサブセット | 約 36 MB |
 | `levelOf`（常駐） | 3 MB |
 | 生ファイルバイト列 | パース中のみ。完了後に解放 |
+
+常駐するのは「現在のレベルのサブセット」だけなので、既定の「中」では 36 MB 程度に収まる。
+重いのは「オリジナル」を選んだときで、そこは解像度レベルで制御する前提。
 
 #### トレードオフ（承知の上で採用）
 
 この方式は**切り替えのたびに数秒の再パースが発生する**。
-また再パース時は一時的にフルデータ（168 MB）とサブセットが同時に存在するため、
+また再パース時は一時的にフルデータ（288 MB）とサブセットが同時に存在するため、
 **切替の瞬間のピークメモリは常駐方式と同等になる**。定常時のメモリのみが削減される。
 
 この判断を後から覆せるよう、`config.ts` に切り替えフラグを置く:
@@ -372,7 +398,7 @@ new PackedSplats({
 ```ts
 /**
  * true にすると初回パース結果をメモリに常駐させ、レベル切替を再パースなしで行う。
- * 定常メモリは増える（300万splatで約168MB）が、切替が即時になる。
+ * 定常メモリは増える（300万splat・SH次数3 で約288MB）が、切替が即時になる。
  */
 export const KEEP_FULL_IN_MEMORY = false;
 ```
@@ -1146,6 +1172,7 @@ export const PROGRESS_YIELD_INTERVAL_MS = 100;
 | D-12 | 既定の向きを「-Y が上・+X が右」に固定 | 依頼者の指示。当初の方向 `(1, 0.6, 1)` では画面右ベクトルが `(-0.707, 0, 0.707)` となり **+X が左**を向いていた | 方向をハードコードせず条件から導出するため、算出コードがやや長い |
 | D-13 | up の自動推定を既定で無効化 | D-12 で向きを明示指定されたため、推定が働くと指定した既定が守られない。推定は外すことがあり、ファイルごとに初期の向きが変わる | データ由来の傾きは自動補正されない。`ENABLE_UP_ESTIMATION` で戻せる |
 | D-15 | VR 入場時に worldRoot の向き・位置・スケールを合わせる | VR では `camera.up` が無視されるため、モデル側を回さないと「-Y が上・+X が右」が成立しない。またモデル座標をそのまま XR 空間に置くと位置もスケールも破綻する | VR とデスクトップで `worldRoot` の状態が変わる。VR 終了時に単位変換へ戻す必要がある |
+| D-21 | `PackedSplats` から `ExtSplats` へ切り替え（`accumExtSplats: true` も設定） | 16 バイト形式は位置が float16 で、広がりに対して splat が小さいデータでは位置誤差が σ の最大 34.8% に達し、斑点状・縞状の抜けが出る。32 バイト形式は位置が float32 で誤差ゼロ | メモリが 16→32 B/splat（SH 込みで 56→96 B/splat）に増える。Quest 2 ではテクスチャ帯域も倍になるため、必要なら解像度レベルを下げて調整する |
 | D-19 | XR ボタンの文言と要求するセッション種別を端末の対応状況から決める | スマートフォンは `immersive-ar` にしか対応しないため、`immersive-vr` を要求すると必ず失敗する。文言も「VR」では実態と合わない | 端末ごとに UI の見え方が変わる。検証は `navigator.xr` を差し替えて行う |
 | D-20 | iOS の AR を対象外とする | 依頼者の判断。iOS Safari は WebXR 非対応で `navigator.xr` が存在せず、`getUserMedia` + `deviceorientation` による別系統の実装が必要になる | iPhone では AR ボタンが出ない |
 | D-17 | パススルーを `immersive-ar` セッションとして実装 | WebXR にはパススルーを直接指定する API が無く、`immersive-ar` の環境ブレンドとして提供される | セッション種別が変わるため、VR とパススルーは入り直さないと切り替えられない |
