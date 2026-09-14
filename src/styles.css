@@ -159,3 +159,15 @@ html, body {
 .overlay__box .button { margin-top: 18px; }
 
 .panel__note--muted { color: var(--panel-muted); }
+
+.panel__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  user-select: none;
+}
+.panel__check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.panel__check input:disabled { cursor: not-allowed; }
+.panel__check:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }

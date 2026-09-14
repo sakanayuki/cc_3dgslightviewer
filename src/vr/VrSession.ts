@@ -99,6 +99,11 @@ export class VrSession {
     return this.session !== undefined;
   }
 
+  /** 実行中のセッション。光源推定などセッション固有の機能から使う */
+  get activeSession(): XRSession | undefined {
+    return this.session;
+  }
+
   /** スティック移動の速度 [m/s] を設定する */
   setMoveSpeed(metersPerSecond: number): void {
     this.locomotion.moveSpeed = metersPerSecond;
@@ -107,7 +112,9 @@ export class VrSession {
   async enter(mode: XrMode): Promise<void> {
     if (this.session || !navigator.xr) return;
     const session = await navigator.xr.requestSession(SESSION_MODE[mode], {
-      optionalFeatures: ['local-floor', 'bounded-floor'],
+      // light-estimation は対応端末でのみ有効になる。optional なので
+      // 非対応端末でもセッション自体は張れる。
+      optionalFeatures: ['local-floor', 'bounded-floor', 'light-estimation'],
     });
     this.mode = mode;
     this.session = session;

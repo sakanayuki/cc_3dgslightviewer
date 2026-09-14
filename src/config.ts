@@ -109,6 +109,28 @@ export const VR_FIXED_FOVEATION = 1.0;
 export const VR_FRAMEBUFFER_SCALE = 0.8;
 export const VR_STICK_DEADZONE = 0.15;
 
+// ── AR の光源推定 ─────────────────────────────────────────────
+/**
+ * AR で現実の光に馴染ませる機能の既定 ON/OFF。
+ * WebXR の light-estimation に対応していない端末では自動的に無効になる。
+ */
+export const AR_LIGHT_ENABLED_DEFAULT = true;
+
+/** SH 係数のフレーム間平滑化の係数 (0〜1、小さいほど滑らか)。推定は毎フレーム揺れる */
+export const AR_LIGHT_SMOOTHING = 0.08;
+
+/** 効果の ON/OFF 切替を補間する秒数。急に変わるとちらつくため */
+export const AR_LIGHT_FADE_SECONDS = 0.4;
+
+/**
+ * 露出の圧縮指数。環境の明るさの比をこの指数で圧縮する。
+ * 1.0 で線形、0 で露出変化なし。0.5 は「4倍明るい部屋で2倍明るくなる」程度。
+ */
+export const AR_LIGHT_EXPOSURE_GAMMA = 0.5;
+/** 露出倍率の下限・上限。元データの見た目を壊さないよう控えめに抑える */
+export const AR_LIGHT_EXPOSURE_MIN = 0.7;
+export const AR_LIGHT_EXPOSURE_MAX = 1.4;
+
 // ── UI ────────────────────────────────────────────────────────
 export const BACKGROUND_COLORS = [
   { label: '黒', value: '#000000' },

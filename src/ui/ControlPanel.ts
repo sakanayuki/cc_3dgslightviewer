@@ -1,4 +1,9 @@
-import { BACKGROUND_COLORS, DEFAULT_BACKGROUND, LEVELS } from '../config';
+import {
+  AR_LIGHT_ENABLED_DEFAULT,
+  BACKGROUND_COLORS,
+  DEFAULT_BACKGROUND,
+  LEVELS,
+} from '../config';
 import { S, formatCount } from './strings';
 import type { XrMode, XrSupport } from '../types';
 
@@ -7,6 +12,7 @@ export interface ControlPanelCallbacks {
   onBackgroundChange: (color: string) => void;
   onOpenAnother: () => void;
   onToggleVr: (mode: XrMode) => void;
+  onArLightChange: (enabled: boolean) => void;
 }
 
 /** 左下のコントロールパネル */
@@ -21,6 +27,8 @@ export class ControlPanel {
   private readonly xrRow: HTMLElement;
   private readonly xrSelect: HTMLSelectElement;
   private readonly xrNote: HTMLElement;
+  private readonly arLightRow: HTMLElement;
+  private readonly arLightCheckbox: HTMLInputElement;
   private support: XrSupport = { vr: false, passthrough: false };
 
   constructor(private readonly cb: ControlPanelCallbacks) {
@@ -99,6 +107,23 @@ export class ControlPanel {
     this.xrNote.className = 'panel__note panel__note--muted';
     this.xrNote.hidden = true;
 
+    // 現実の光に馴染ませる (光源推定)
+    this.arLightRow = document.createElement('div');
+    this.arLightRow.className = 'panel__row';
+    this.arLightRow.hidden = true;
+    const arLightLabel = document.createElement('label');
+    arLightLabel.className = 'panel__check';
+    this.arLightCheckbox = document.createElement('input');
+    this.arLightCheckbox.type = 'checkbox';
+    this.arLightCheckbox.id = 'ar-light-toggle';
+    this.arLightCheckbox.checked = AR_LIGHT_ENABLED_DEFAULT;
+    this.arLightCheckbox.addEventListener('change', () => {
+      this.cb.onArLightChange(this.arLightCheckbox.checked);
+    });
+    arLightLabel.append(this.arLightCheckbox, document.createTextNode(S.arLightToggle));
+    arLightLabel.title = S.arLightHint;
+    this.arLightRow.append(arLightLabel);
+
     // 注記 (VR中の制限など)
     this.note = document.createElement('p');
     this.note.className = 'panel__note';
@@ -130,6 +155,7 @@ export class ControlPanel {
       levelRow,
       bgRow,
       this.xrRow,
+      this.arLightRow,
       this.xrNote,
       this.note,
       hr,
@@ -171,6 +197,17 @@ export class ControlPanel {
     return this.xrSelect.value === 'passthrough' ? 'passthrough' : 'vr';
   }
 
+  /** 現実の光に馴染ませる設定 */
+  get arLightEnabled(): boolean {
+    return this.arLightCheckbox.checked;
+  }
+
+  /** 端末が光源推定に非対応だった場合に、理由を添えて操作不可にする */
+  setArLightAvailable(available: boolean): void {
+    this.arLightCheckbox.disabled = !available;
+    this.arLightRow.title = available ? S.arLightHint : S.arLightUnsupported;
+  }
+
   /** ヘッドセットの VR ではなく、スマートフォンの AR として扱うか */
   private get isArOnly(): boolean {
     return !this.support.vr && this.support.passthrough;
@@ -190,6 +227,9 @@ export class ControlPanel {
     const available = support.vr || support.passthrough;
     this.vrButton.hidden = !available;
     this.vrButton.textContent = this.isArOnly ? S.buttonEnterAr : S.buttonEnterVr;
+
+    // 光源推定はカメラ映像に重ねるモードでのみ意味がある
+    this.arLightRow.hidden = !support.passthrough;
 
     // 背景の選択はヘッドセットで両方に対応しているときだけ意味がある
     const canChooseBackground = support.vr && support.passthrough;

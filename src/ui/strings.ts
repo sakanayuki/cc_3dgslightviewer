@@ -28,6 +28,10 @@ export const S = {
   xrBackgroundPassthrough: 'パススルー',
   xrPassthroughUnsupported: 'この端末はパススルー (immersive-ar) に対応していません。',
   arHint: 'カメラ映像に3DGSを重ねて表示します。',
+  labelArLight: '現実の光',
+  arLightToggle: '現実の光に馴染ませる',
+  arLightHint: 'カメラから推定した環境光の色と明るさを splat に反映します。',
+  arLightUnsupported: 'この端末は光源推定 (light-estimation) に対応していません。',
   errXrStartFailed: 'VR を開始できませんでした。ヘッドセットで開いているかご確認ください。',
   errArStartFailed:
     'AR を開始できませんでした。カメラの使用を許可しているかご確認ください。',

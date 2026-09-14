@@ -369,6 +369,7 @@ console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替
   let p2 = await openWith([]);
   check('XR 非対応: ボタンを出さない', await p2.locator('.button--vr').isHidden());
   check('XR 非対応: VR背景の選択も出さない', await p2.locator('#xr-background-select').isHidden());
+  check('XR 非対応: 現実の光の設定も出さない', await p2.locator('#ar-light-toggle').isHidden());
   await p2.close();
 
   // (b) ヘッドセット: VR のみ対応 (パススルー非対応)
@@ -378,6 +379,8 @@ console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替
   check('VRのみ: 背景の選択は出さない', await p2.locator('#xr-background-select').isHidden());
   check('VRのみ: パススルー非対応の理由を出す',
     (await p2.locator('.panel__note--muted').innerText()).includes('パススルー'));
+  check('VRのみ: 現実の光の設定は出さない (カメラ映像が無いので無意味)',
+    await p2.locator('#ar-light-toggle').isHidden());
   await p2.locator('.button--vr').click();
   await p2.waitForTimeout(400);
   check('VRのみ: immersive-vr を要求する',
@@ -395,6 +398,9 @@ console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替
     await p2.locator('#xr-background-select').isHidden());
   check('ARのみ: 使い方の注記を出す',
     (await p2.locator('.panel__note--muted').innerText()).includes('カメラ映像'));
+  check('ARのみ: 現実の光の設定を出す', await p2.locator('#ar-light-toggle').isVisible());
+  check('ARのみ: 現実の光は既定で ON',
+    await p2.locator('#ar-light-toggle').isChecked());
   await p2.locator('.button--vr').click();
   await p2.waitForTimeout(400);
   const requested = await p2.evaluate(() => window.__requested);
@@ -412,6 +418,7 @@ console.log('\n=== 11. XR 対応状況に応じた UI (navigator.xr を差し替
   check('両対応: 背景の選択を出す', await p2.locator('#xr-background-select').isVisible());
   check('両対応: 注記は出さない', await p2.locator('.panel__note--muted').isHidden());
   check('両対応: 既定は背景色', (await p2.locator('#xr-background-select').inputValue()) === 'vr');
+  check('両対応: 現実の光の設定を出す', await p2.locator('#ar-light-toggle').isVisible());
   await p2.selectOption('#xr-background-select', 'passthrough');
   await p2.locator('.button--vr').click();
   await p2.waitForTimeout(400);

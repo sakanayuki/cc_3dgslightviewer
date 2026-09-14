@@ -5,6 +5,7 @@ import { CameraController } from '../camera/CameraController';
 import { AxisGizmo } from '../gizmo/AxisGizmo';
 import { VrSession } from '../vr/VrSession';
 import { computeVrPlacement } from '../vr/placement';
+import { ArLight } from '../ar/ArLight';
 import { S } from '../ui/strings';
 import { ViewerError } from '../types';
 import type { SceneBounds, XrMode, XrSupport } from '../types';
@@ -26,6 +27,7 @@ export class Viewer {
   readonly gizmo = new AxisGizmo();
   readonly camControls: CameraController;
   readonly vr: VrSession;
+  readonly arLight = new ArLight();
 
   private readonly sparkRenderer: SparkRenderer;
   private mesh: SplatMesh | null = null;
@@ -75,12 +77,18 @@ export class Viewer {
         this.camControls.setEnabled(false);
         this.applyVrPlacement();
         this.applyXrBackground(mode);
+        // 光源推定はカメラ映像に重ねるモードでのみ意味がある
+        if (mode === 'passthrough') {
+          const session = this.vr.activeSession;
+          if (session) void this.arLight.start(session, this.mesh);
+        }
         onVrChange(true);
       },
       onExit: () => {
         this.vrActive = false;
         this.gizmo.visible = true;
         this.camControls.setEnabled(true);
+        this.arLight.stop();
         this.resetWorldRoot();
         this.applyBackground();
         onVrChange(false);
@@ -155,6 +163,7 @@ export class Viewer {
     const mesh = new SplatMesh({ packedSplats: splats });
     this.worldRoot.add(mesh);
     this.mesh = mesh;
+    this.arLight.attachTo(mesh);
     return mesh;
   }
 
@@ -196,16 +205,17 @@ export class Viewer {
   }
 
   start(): void {
-    this.renderer.setAnimationLoop(() => this.frame());
+    this.renderer.setAnimationLoop((_time, frame) => this.frame(frame));
   }
 
-  private frame(): void {
+  private frame(xrFrame?: XRFrame): void {
     const now = performance.now();
     const dt = Math.min(0.1, (now - this.lastFrameTime) / 1000);
     this.lastFrameTime = now;
 
     if (this.vrActive) {
       this.vr.update(this.camera, dt);
+      this.arLight.update(xrFrame, dt);
     } else {
       this.camControls.update();
     }

@@ -37,6 +37,7 @@ class App {
       onBackgroundChange: (color) => this.viewer.setBackground(color),
       onOpenAnother: () => this.reset(),
       onToggleVr: (mode) => void this.toggleVr(mode),
+      onArLightChange: (enabled) => this.viewer.arLight.setWanted(enabled),
     });
 
     this.dropZone = new FileDropZone((file) => void this.load(file));
@@ -44,6 +45,7 @@ class App {
 
     root.append(this.dropZone.root, this.panel.root, this.overlay.root);
 
+    this.viewer.arLight.setWanted(this.panel.arLightEnabled);
     this.viewer.start();
     void this.viewer.checkXrSupport().then((support) => this.panel.setXrSupport(support));
   }
@@ -169,8 +171,13 @@ class App {
 
   private async toggleVr(mode: XrMode): Promise<void> {
     try {
-      if (this.viewer.vr.isActive) await this.viewer.vr.exit();
-      else await this.viewer.vr.enter(mode);
+      if (this.viewer.vr.isActive) {
+        await this.viewer.vr.exit();
+      } else {
+        await this.viewer.vr.enter(mode);
+        // 光源推定が使えたかはセッション開始後にしか分からない
+        this.panel.setArLightAvailable(this.viewer.arLight.isAvailable);
+      }
     } catch (e) {
       console.error('[main] XR セッションの開始に失敗しました', e);
       const message = mode === 'passthrough' ? S.errArStartFailed : S.errXrStartFailed;
